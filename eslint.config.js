@@ -53,4 +53,17 @@ export default tseslint.config(
     linterOptions: { noInlineConfig: true },
     rules: engineRestrictions,
   },
+  {
+    // Tests feed hostile input on purpose (NBSP, control characters, the RFC 8785
+    // sample numbers) and use non-null assertions on fixtures they just built.
+    // shell-difftest is test-only code, never published.
+    files: ["packages/*/test/**/*.ts", "packages/shell-difftest/src/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "no-irregular-whitespace": "off",
+      "no-control-regex": "off",
+      "no-useless-escape": "off",
+      "no-loss-of-precision": "off",
+    },
+  },
 );
