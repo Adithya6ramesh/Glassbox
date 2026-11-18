@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    // No Node or DOM types: the engine must not reach for process, Buffer,
+    // require, fetch or any host API. The one host call it may make is
+    // declared by hand in src/host.d.ts.
+    "types": [],
+    "lib": ["ES2023"]
+  },
+  "include": ["src"]
+}

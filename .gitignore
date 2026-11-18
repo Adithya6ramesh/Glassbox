@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.vitest-cache/
+
+# Internal design docs live outside the public repo.
+docs/

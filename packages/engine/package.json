@@ -1,0 +1,28 @@
+{
+  "name": "@glassbox/engine",
+  "version": "0.0.0",
+  "description": "Glassbox security engine: pure, deterministic analysis of MCP metadata and agent tool calls.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/curves": "2.4.0",
+    "@noble/hashes": "2.4.0",
+    "re2js": "2.9.1",
+    "valibot": "1.5.0"
+  }
+}

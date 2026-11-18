@@ -1,0 +1,8 @@
+{
+  "name": "@glassbox/rules-baseline",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Public Glassbox baseline ruleset (JSON data) and its signing script.",
+  "license": "Apache-2.0",
+  "type": "module"
+}

@@ -1,0 +1,27 @@
+{
+  "name": "glassbox-workspace",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@12.17.0",
+  "engines": {
+    "node": ">=24.11.0",
+    "pnpm": ">=12.17.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "eslint . && tsc -b && vitest run"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "fast-check": "4.10.2",
+    "recheck": "4.6.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}
