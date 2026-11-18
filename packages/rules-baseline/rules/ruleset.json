@@ -1,0 +1,13 @@
+{
+  "rulesetId": "glassbox-baseline",
+  "channel": "baseline",
+  "version": "2026.11.0",
+  "sequence": 1,
+  "createdAt": "2026-11-18T00:00:00Z",
+  "expiresAt": "2027-11-18T00:00:00Z",
+  "minEngineVersion": "0.1.0",
+  "irreversibleTags": [
+    "fs.destroy", "vcs.force-push", "vcs.history-rewrite", "vcs.discard-changes", "db.unscoped-write", "db.ddl",
+    "deploy.prod", "infra.change", "payment", "publish.public", "message.send", "perm.change", "config.agent", "exec.nested-agent"
+  ]
+}

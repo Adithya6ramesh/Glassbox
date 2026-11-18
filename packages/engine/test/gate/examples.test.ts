@@ -10,8 +10,10 @@ EOF
 )"`;
 
 describe("reference verdicts", () => {
-  it("git push --force: ask in strict and balanced, deny in autopilot", () => {
-    expect(acrossModes((c) => bash("git push --force origin main", c))).toEqual(["ask", "ask", "deny"]);
+  // Spec §6.2 (rev 3, approved): in autopilot R3 gives `warn` for high-risk actions, so an
+  // irreversible action with no finding warns rather than asks; R15 only converts asks.
+  it("git push --force: ask in strict and balanced, warn in autopilot", () => {
+    expect(acrossModes((c) => bash("git push --force origin main", c))).toEqual(["ask", "ask", "warn"]);
     const d = bash("git push --force origin main");
     expect(d.actionRisk.level).toBe("high-risk");
     expect(d.actionRisk.tags).toContain("vcs.force-push");

@@ -4,14 +4,14 @@
 //   command_not_found_handle, which only logs its argv;
 // - echo, printf, true, false, test, [, pwd, kill and read are replaced by logging functions;
 // - HOME and the working directory are a fresh sandbox directory.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PREAMBLE = String.raw`
 exec 9>>"$GBX_LOG"
-__gbx_log() { local a; printf '%s\0' "$#" >&9; for a in "$@"; do printf '%s\0' "$a" >&9; done; }
+__gbx_log() { builtin printf '%s\0' "$#" "$@" >&9; }
 command_not_found_handle() { __gbx_log "$@"; return 0; }
 echo() { __gbx_log echo "$@"; }
 printf() { __gbx_log printf "$@"; }
@@ -40,6 +40,39 @@ export function findBash(): string | undefined {
   return undefined;
 }
 
+/**
+ * Red team RT-T1: the harness must never be able to run a real program. Git for Windows'
+ * bin/bash.exe is a launcher that re-adds /usr/bin to PATH, so "PATH = empty dir" did not
+ * isolate anything there. Before any corpus command runs, this probe (bash builtins only)
+ * checks that no common program is reachable. If one is, the harness refuses to run.
+ * On Windows, point GLASSBOX_BASH at Git's usr/bin/bash.exe, which honours PATH.
+ */
+export function assertIsolated(bash: string): void {
+  const root = mkdtempSync(join(tmpdir(), "gbx-difftest-probe-"));
+  const empty = join(root, "empty-path");
+  mkdirSync(empty);
+  try {
+    const r = spawnSync(bash, ["--norc", "--noprofile", "-c", "for c in rm ls cp mv cat curl wget git sh env find chmod; do if command -v \"$c\" >/dev/null 2>&1; then echo \"$c\"; fi; done"], {
+      cwd: root,
+      env: { PATH: empty, HOME: root },
+      encoding: "utf8",
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    const reachable = (r.stdout ?? "").split(/\s+/).filter(Boolean);
+    if (r.status !== 0 || r.error || reachable.length > 0) {
+      throw new Error(`T-DIFF refuses to run: ${bash} can reach real programs (${reachable.join(", ") || r.error?.message || `status ${r.status}`}). On Windows use Git's usr/bin/bash.exe.`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+/** Corpus commands that name a program by path would bypass PATH isolation: never run them. */
+export function safeToExecute(command: string): boolean {
+  return !/(^|[\s;|&(`$'"=])(\/|\.\.?\/|~\/)[^\s;|&)]*\/[^\s;|&)]*/.test(command) && !/\b(builtin|enable|exec)\b/.test(command) && !command.includes("/dev/tcp") && !command.includes("/dev/udp");
+}
+
 function parseLog(buf: Buffer): string[][] {
   const parts = buf.toString("utf8").split("\0");
   const out: string[][] = [];
@@ -53,7 +86,12 @@ function parseLog(buf: Buffer): string[][] {
   return out;
 }
 
+const isolated = new Set<string>();
+
 export function runInBash(bash: string, command: string, timeoutMs = 4000): Promise<BashRun> {
+  // Never run anything unless this bash is proven unable to reach real programs (RT-T1).
+  if (!isolated.has(bash)) { assertIsolated(bash); isolated.add(bash); }
+  if (!safeToExecute(command)) return Promise.reject(new Error("refusing to execute a command that names a program by path"));
   const root = mkdtempSync(join(tmpdir(), "gbx-difftest-"));
   const sandbox = join(root, "sandbox");
   const emptyPath = join(root, "empty-path");

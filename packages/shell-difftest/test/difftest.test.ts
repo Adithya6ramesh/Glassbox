@@ -5,12 +5,25 @@
 import { describe, expect, it } from "vitest";
 import { shellArgvView } from "../../engine/src/action/shell/view.js";
 import { buildCorpus } from "../src/corpus.js";
-import { findBash, runInBash, viewCovers } from "../src/harness.js";
+import { assertIsolated, findBash, runInBash, safeToExecute, viewCovers } from "../src/harness.js";
 
 const bash = findBash();
 const CONCURRENCY = 8;
 
 describe.runIf(bash !== undefined)("T-DIFF: shell parser vs real bash", () => {
+  it("RT-T1: the bash under test can't reach any real program (else refuse to run)", () => {
+    expect(() => assertIsolated(bash!)).not.toThrow();
+  });
+
+  it("RT-T1: commands that name a program by path are never executed", () => {
+    expect(safeToExecute("/bin/rm -rf ~")).toBe(false);
+    expect(safeToExecute("echo a; /usr/bin/curl x")).toBe(false);
+    expect(safeToExecute("../x/run.sh")).toBe(false);
+    expect(safeToExecute("builtin echo x")).toBe(false);
+    expect(safeToExecute("cat < /dev/tcp/h/80")).toBe(false);
+    expect(safeToExecute("rm -rf / ; echo 'a b'")).toBe(true);
+  });
+
   it("harness sanity: bash runs and the logger records externals and echo", async () => {
     const r = await runInBash(bash!, "rm -rf / ; echo 'a b' $'c\\x41'");
     expect(r.executed).toEqual([["rm", "-rf", "/"], ["echo", "a b", "cA"]]);
@@ -27,6 +40,7 @@ describe.runIf(bash !== undefined)("T-DIFF: shell parser vs real bash", () => {
   });
 
   it("every command bash executes is in the parser's view when the parser says analyzable", async () => {
+    assertIsolated(bash!);
     const corpus = buildCorpus();
     const failures: string[] = [];
     let analyzable = 0;
@@ -35,7 +49,7 @@ describe.runIf(bash !== undefined)("T-DIFF: shell parser vs real bash", () => {
       while (next < corpus.length) {
         const cmd = corpus[next++]!;
         const view = shellArgvView(cmd);
-        if (!view.analyzable) continue;
+        if (!view.analyzable || !safeToExecute(cmd)) continue;
         analyzable++;
         const run = await runInBash(bash!, cmd);
         if (run.syntaxError) { failures.push(`bash rejects, parser accepts: ${JSON.stringify(cmd)}`); continue; }

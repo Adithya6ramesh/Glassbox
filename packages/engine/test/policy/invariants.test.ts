@@ -92,7 +92,8 @@ describe("floors hold under every user policy (property)", () => {
 
 describe("mode table (§6.2)", () => {
   it("tagOverrides apply to R3 only and the most restrictive tag wins (§6.3)", () => {
-    const c = ctx({ policy: { mode: "balanced", tagOverrides: { "vcs.push": "allow" } } });
+    // A plain push carries net.egress too (network-touching is high-risk), so both tags are overridden.
+    const c = ctx({ policy: { mode: "balanced", tagOverrides: { "vcs.push": "allow", "net.egress": "allow" } } });
     expect(bash("git push --force", c).verdict).toBe("ask");
     expect(bash("git push origin main", c).verdict).toBe("allow");
     const deny = ctx({ policy: { mode: "autopilot", tagOverrides: { "net.egress": "deny" } } });
@@ -117,7 +118,8 @@ describe("mode table (§6.2)", () => {
   });
 
   it("verdictBeforeMode is set when autopilot turns ask into deny", () => {
-    const d = bash("git push --force", ctx({ policy: { mode: "autopilot" } }));
+    // An unanalyzable command asks (R9 floor); autopilot turns that ask into deny (R15).
+    const d = bash("eval \"$X\"", ctx({ policy: { mode: "autopilot" } }));
     expect(d.verdict).toBe("deny");
     expect(d.verdictBeforeMode).toBe("ask");
   });

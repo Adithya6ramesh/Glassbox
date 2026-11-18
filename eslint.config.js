@@ -13,6 +13,8 @@ const BANNED_MODULES = [
 ];
 
 const engineRestrictions = {
+  // The engine detects and escapes control characters, so regexes name them on purpose.
+  "no-control-regex": "off",
   "no-eval": "error",
   "no-implied-eval": "error",
   "no-new-func": "error",
@@ -52,6 +54,11 @@ export default tseslint.config(
     // rule above off. Inline config is ignored for engine source.
     linterOptions: { noInlineConfig: true },
     rules: engineRestrictions,
+  },
+  {
+    // Dev-time Node scripts (never part of the engine).
+    files: ["packages/*/scripts/**/*.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } },
   },
   {
     // Tests feed hostile input on purpose (NBSP, control characters, the RFC 8785

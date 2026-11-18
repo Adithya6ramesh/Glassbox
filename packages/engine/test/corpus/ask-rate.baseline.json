@@ -1,1 +1,14 @@
-{"strict":{"ask":0,"deny":0},"balanced":{"ask":0,"deny":0},"autopilot":{"ask":0,"deny":0}}
+{
+  "strict": {
+    "ask": 0.2368,
+    "deny": 0.0113
+  },
+  "balanced": {
+    "ask": 0.0827,
+    "deny": 0.0113
+  },
+  "autopilot": {
+    "ask": 0,
+    "deny": 0.0207
+  }
+}
