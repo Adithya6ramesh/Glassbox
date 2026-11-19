@@ -1,7 +1,7 @@
 // PowerShell analysis (engine-spec §7.4, rev 3/4): hand-written tokenizer, alias table,
 // cmdlet classes; native programs go through the §7.3 command table.
 import { Acc } from "./acc.js";
-import { isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
+import { isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
@@ -471,8 +471,7 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("deletes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "deletes a file that controls the agent or Glassbox");
-      const persist = persistenceLabel(p, pctx);
-      if (persist) acc.protect("CP-SELF-004", `deletes a ${persist}`);
+      acc.persist(persistenceHit(p, pctx), "deletes");
       if (recurse && !narrowed && destroysTopLevel(p.path, pctx)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", "deletes a whole drive, the home directory or a top-level folder in it"); }
     }
     return;
@@ -488,8 +487,7 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("writes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-      const persist = persistenceLabel(p, pctx);
-      if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
+      acc.persist(persistenceHit(p, pctx), "changes");
       const lp = (p.path ?? "").toLowerCase();
       if (lp.endsWith("profile.ps1") || lp.includes("/.git/hooks/")) acc.tag("high-risk", "config.agent");
     }

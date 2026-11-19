@@ -250,40 +250,53 @@ const HOME_FILES: [string, string][] = [
   [".pypirc", "registry-credentials"], [".git-credentials", "credentials"], [".config/gh/hosts.yml", "credentials"],
 ];
 
-// Persistence locations (spec rev 6, Q3): files that make code run later (login, boot, a
-// schedule, every shell or git command) or grant remote access. Writes are protected (CP-SELF-004).
-const PERSIST_HOME_FILES = [
+// Persistence locations (spec rev 6, Q3; rev 7): files that make code run later (login,
+// boot, a schedule, every shell or git command) or grant remote access.
+//  - "deny": remote access, scheduled jobs, boot and session autostart (CP-SELF-004, protected).
+//  - "ask":  shell and PowerShell startup files and global git config (CP-SELF-005). People
+//    edit these by hand routinely, so the user decides; autopilot denies (R15).
+const DENY_HOME_FILES = [".ssh/rc", ".ssh/authorized_keys", ".ssh/authorized_keys2", ".ssh/config"];
+const ASK_HOME_FILES = [
   ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout",
-  ".kshrc", ".cshrc", ".tcshrc", ".xprofile", ".xinitrc", ".xsessionrc", ".config/fish/config.fish", ".ssh/rc",
-  ".ssh/authorized_keys", ".ssh/authorized_keys2", ".ssh/config", ".gitconfig", ".config/git/config",
+  ".kshrc", ".cshrc", ".tcshrc", ".xprofile", ".xinitrc", ".xsessionrc", ".config/fish/config.fish", ".gitconfig", ".config/git/config",
 ];
-const PERSIST_HOME_DIRS = [
-  ".config/fish/conf.d", ".config/git/hooks", ".config/systemd/user", ".config/autostart", "library/launchagents",
-  "appdata/roaming/microsoft/windows/start menu/programs/startup", ".config/powershell",
-  "documents/windowspowershell", "documents/powershell",
-];
-const PERSIST_SYSTEM = [
+const DENY_HOME_DIRS = [".config/systemd/user", ".config/autostart", "library/launchagents", "appdata/roaming/microsoft/windows/start menu/programs/startup"];
+const ASK_HOME_DIRS = [".config/fish/conf.d", ".config/git/hooks", ".config/powershell", "documents/windowspowershell", "documents/powershell"];
+const DENY_SYSTEM = [
   "/etc/cron", "/var/spool/cron/", "/etc/systemd/system/", "/lib/systemd/system/", "/usr/lib/systemd/system/", "/library/launchagents/",
-  "/library/launchdaemons/", "/etc/profile", "/etc/bash.bashrc", "/etc/zshrc", "/etc/zsh/", "/etc/rc.local", "/etc/ld.so.preload",
-  "/etc/init.d/", "/etc/xdg/autostart/", "c:/programdata/microsoft/windows/start menu/programs/startup/",
+  "/library/launchdaemons/", "/etc/rc.local", "/etc/ld.so.preload", "/etc/init.d/", "/etc/xdg/autostart/", "c:/programdata/microsoft/windows/start menu/programs/startup/",
 ];
+const ASK_SYSTEM = ["/etc/profile", "/etc/bash.bashrc", "/etc/zshrc", "/etc/zsh/"];
 
-/** A label when writing `np` would install persistence or change remote access, else null. */
-export function persistenceLabel(np: NormPath, ctx: PathCtx): string | null {
+export interface PersistHit { kind: "deny" | "ask"; label: string }
+
+const SSH = "SSH access or startup file";
+const STARTUP = "shell, PowerShell or git startup file";
+const AUTOSTART = "autostart or scheduled-job location";
+const SYSTEM = "system startup or scheduled-job location";
+
+/** Where writing `np` would install persistence or change remote access, else null. */
+export function persistenceHit(np: NormPath, ctx: PathCtx): PersistHit | null {
   const lower = trimEndChars((np.path ?? np.suffix ?? "").toLowerCase(), "/");
   if (lower === "") return null;
-  const home = (normalizeFull(ctx.homeDir, { ...ctx, cwd: "/" }) ?? "").toLowerCase();
+  const under = (base: string, d: string) => lower === `${base}/${d}` || lower.startsWith(`${base}/${d}/`);
   if (np.path !== null) {
+    const home = (normalizeFull(ctx.homeDir, { ...ctx, cwd: "/" }) ?? "").toLowerCase();
     if (home) {
-      for (const f of PERSIST_HOME_FILES) if (lower === `${home}/${f}`) return f.includes("ssh/") ? "SSH access or startup file" : "shell, git or login startup file";
-      for (const d of PERSIST_HOME_DIRS) if (lower === `${home}/${d}` || lower.startsWith(`${home}/${d}/`)) return "autostart, scheduled or profile location";
+      for (const f of DENY_HOME_FILES) if (lower === `${home}/${f}`) return { kind: "deny", label: SSH };
+      for (const d of DENY_HOME_DIRS) if (under(home, d)) return { kind: "deny", label: AUTOSTART };
+      for (const f of ASK_HOME_FILES) if (lower === `${home}/${f}`) return { kind: "ask", label: STARTUP };
+      for (const d of ASK_HOME_DIRS) if (under(home, d)) return { kind: "ask", label: STARTUP };
     }
-    for (const s of PERSIST_SYSTEM) if (lower.startsWith(s) || lower === s.replace(/\/$/, "")) return "system startup or scheduled-job location";
+    for (const s of DENY_SYSTEM) if (lower.startsWith(s) || lower === trimEndChars(s, "/")) return { kind: "deny", label: SYSTEM };
+    for (const s of ASK_SYSTEM) if (lower.startsWith(s) || lower === trimEndChars(s, "/")) return { kind: "ask", label: STARTUP };
     return null;
   }
   // Only the suffix is known (e.g. $SOMEDIR/.bashrc): match on the file name.
-  for (const f of PERSIST_HOME_FILES) if (lower.endsWith("/" + f)) return "shell, git or login startup file";
-  for (const d of PERSIST_HOME_DIRS) if (lower.includes("/" + d + "/") || lower.endsWith("/" + d)) return "autostart, scheduled or profile location";
+  for (const f of DENY_HOME_FILES) if (lower.endsWith("/" + f)) return { kind: "deny", label: SSH };
+  for (const d of DENY_HOME_DIRS) if (lower.includes("/" + d + "/") || lower.endsWith("/" + d)) return { kind: "deny", label: AUTOSTART };
+  for (const f of ASK_HOME_FILES) if (lower.endsWith("/" + f)) return { kind: "ask", label: STARTUP };
+  for (const d of ASK_HOME_DIRS) if (lower.includes("/" + d + "/") || lower.endsWith("/" + d)) return { kind: "ask", label: STARTUP };
   return null;
 }
 

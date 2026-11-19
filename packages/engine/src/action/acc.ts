@@ -41,6 +41,16 @@ export class Acc {
     this.reason(reason);
   }
 
+  /** A write or delete of a persistence location: protected (deny) or a CP-SELF-005 ask. */
+  persist(hit: { kind: "deny" | "ask"; label: string } | null, verb: "changes" | "deletes"): void {
+    if (hit === null) return;
+    const why = `${verb} a ${hit.label}`;
+    if (hit.kind === "deny") { this.protect("CP-SELF-004", why); return; }
+    this.tag("high-risk", "config.agent");
+    this.find("CP-SELF-005", why);
+    this.reason(why);
+  }
+
   find(ruleId: string, note?: string): void {
     if (!this.findings.some((f) => f.ruleId === ruleId)) this.findings.push(note === undefined ? { ruleId } : { ruleId, note });
   }

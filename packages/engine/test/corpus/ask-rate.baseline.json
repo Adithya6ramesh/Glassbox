@@ -1,11 +1,11 @@
 {
   "strict": {
-    "ask": 0.235,
-    "deny": 0.0132
+    "ask": 0.2368,
+    "deny": 0.0113
   },
   "balanced": {
-    "ask": 0.0808,
-    "deny": 0.0132
+    "ask": 0.0827,
+    "deny": 0.0113
   },
   "autopilot": {
     "ask": 0,

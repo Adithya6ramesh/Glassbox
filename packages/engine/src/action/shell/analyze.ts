@@ -3,7 +3,7 @@ import { Acc } from "../acc.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
-  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
+  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
@@ -246,8 +246,7 @@ function destroy(acc: Acc, why: string): void {
 /** Checks for a path that is written, created, moved, deleted, chmod-ed or linked. */
 function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): void {
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-  const persist = persistenceLabel(np, pctx);
-  if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
+  acc.persist(persistenceHit(np, pctx), "changes");
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
