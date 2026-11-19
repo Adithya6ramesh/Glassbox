@@ -186,7 +186,14 @@
       ],
       "matcher": {
         "type": "regex",
-        "pattern": "<\\s*/?\\s*(important|system|instructions?|admin|secret|hidden|override|assistant_instructions)\\s*>"
+        "pattern": "<\\s*/?\\s*(important|system|instructions?|admin|secret|hidden|override|assistant_instructions)\\s*>",
+        "anchors": [
+          "st",
+          "id",
+          "important",
+          "secret",
+          "admin"
+        ]
       },
       "suppressible": true,
       "explanation": "This text uses pseudo-tags such as <IMPORTANT> or <system> to make instructions look authoritative to the AI.",
@@ -226,7 +233,18 @@
       "matcher": {
         "type": "regex",
         "flags": "i",
-        "pattern": "(<\\|im_start\\|>|<\\|im_end\\|>|<\\|system\\|>|</?tool_result>|</?function_results>|</?tool_response>|\\[/?INST\\]|<<SYS>>|(^|\\n)[ \\t]*(human|assistant)[ \\t]*:)"
+        "pattern": "(<\\|im_start\\|>|<\\|im_end\\|>|<\\|system\\|>|</?tool_result>|</?function_results>|</?tool_response>|\\[/?INST\\]|<<SYS>>|(^|\\n)[ \\t]*(human|assistant)[ \\t]*:)",
+        "anchors": [
+          "<|im_",
+          "<|system|>",
+          "tool_result",
+          "function_results",
+          "tool_response",
+          "inst]",
+          "<<sys>>",
+          "human",
+          "assistant"
+        ]
       },
       "suppressible": true,
       "explanation": "This content contains chat role markers (such as <|im_start|> or a line starting with \"Human:\") that try to make text look like it came from the user or the system.",
@@ -372,7 +390,13 @@
       ],
       "matcher": {
         "type": "regex",
-        "pattern": "<\\s*/?\\s*(important|system|instructions?|admin|override)\\s*>"
+        "pattern": "<\\s*/?\\s*(important|system|instructions?|admin|override)\\s*>",
+        "anchors": [
+          "st",
+          "important",
+          "override",
+          "admin"
+        ]
       },
       "suppressible": true,
       "explanation": "Content returned by a tool uses pseudo-tags such as <IMPORTANT> or <system> to make instructions look authoritative.",
@@ -480,7 +504,13 @@
       ],
       "matcher": {
         "type": "regex",
-        "pattern": "((~|\\$HOME|/home/[^/\\s]+|/Users/[^/\\s]+)/\\.(ssh|aws|gnupg|kube|docker|netrc|git-credentials|config/gcloud)|\\bid_(rsa|ed25519|ecdsa)\\b|/etc/shadow|(^|[\\s'\"`(])\\.env(\\.(local|prod|production|dev|development|staging|test|secret|secrets))?([^.\\w]|$))"
+        "pattern": "((~|\\$HOME|/home/[^/\\s]+|/Users/[^/\\s]+)/\\.(ssh|aws|gnupg|kube|docker|netrc|git-credentials|config/gcloud)|\\bid_(rsa|ed25519|ecdsa)\\b|/etc/shadow|(^|[\\s'\"`(])\\.env(\\.(local|prod|production|dev|development|staging|test|secret|secrets))?([^.\\w]|$))",
+        "anchors": [
+          "/.",
+          "id_",
+          "/etc/shado",
+          ".env"
+        ]
       },
       "suppressible": true,
       "explanation": "This metadata refers to a sensitive file location, such as SSH keys, cloud credentials or a .env file.",
@@ -516,7 +546,11 @@
       "matcher": {
         "type": "regex",
         "flags": "i",
-        "pattern": "(!\\[[^\\]]{0,100}\\]\\(\\s*https?://[^\\s)]{1,200}\\?[^\\s)]{12,}\\)|<img[^>]{0,200}src\\s*=\\s*[\"']?https?://[^\"'\\s>]{1,200}\\?[^\"'\\s>]{12,})"
+        "pattern": "(!\\[[^\\]]{0,100}\\]\\(\\s*https?://[^\\s)]{1,200}\\?[^\\s)]{12,}\\)|<img[^>]{0,200}src\\s*=\\s*[\"']?https?://[^\"'\\s>]{1,200}\\?[^\"'\\s>]{12,})",
+        "anchors": [
+          "![",
+          "<img"
+        ]
       },
       "suppressible": true,
       "explanation": "This content contains an image whose URL carries a long query string. If rendered, an image like this can send data to a third party without anyone clicking.",
@@ -799,11 +833,32 @@
         "of": [
           {
             "type": "regex",
-            "pattern": "(ignor(a|e|en|ad) (todas )?(las )?instrucciones (anteriores|previas)|ignor(e|a|em) (todas )?(as )?instru(ç|c)(õ|o)es anteriores|ignor(e|ez|er) (toutes )?les instructions (précédentes|precedentes|antérieures)|ignorier(e|en) (sie )?(alle )?(vorherigen|bisherigen|früheren) (anweisungen|instruktionen)|ignora (tutte )?le istruzioni precedenti|игнорир[а-я]* (все )?(предыдущие|прежние) (инструкции|указания)|忽略(之前|以前|先前|上面|上述)?的?(所有|全部)?的?(指令|指示|说明|提示)|(以前|これまで|前|上記)の(すべての|全ての)?(指示|命令)を無視|이전의? (모든 )?(지시|명령)(를|을)? 무시|पिछले (सभी )?निर्देशों को (अनदेखा|नजरअंदाज|नज़रअंदाज़)|تجاهل (جميع|كل) (التعليمات|الأوامر) السابقة)"
+            "pattern": "(ignor(a|e|en|ad) (todas )?(las )?instrucciones (anteriores|previas)|ignor(e|a|em) (todas )?(as )?instru(ç|c)(õ|o)es anteriores|ignor(e|ez|er) (toutes )?les instructions (précédentes|precedentes|antérieures)|ignorier(e|en) (sie )?(alle )?(vorherigen|bisherigen|früheren) (anweisungen|instruktionen)|ignora (tutte )?le istruzioni precedenti|игнорир[а-я]* (все )?(предыдущие|прежние) (инструкции|указания)|忽略(之前|以前|先前|上面|上述)?的?(所有|全部)?的?(指令|指示|说明|提示)|(以前|これまで|前|上記)の(すべての|全ての)?(指示|命令)を無視|이전의? (모든 )?(지시|명령)(를|을)? 무시|पिछले (सभी )?निर्देशों को (अनदेखा|नजरअंदाज|नज़रअंदाज़)|تجاهل (جميع|كل) (التعليمات|الأوامر) السابقة)",
+            "anchors": [
+              "ignor",
+              "を無視",
+              "이전",
+              "пре",
+              "िर्देशों क",
+              "السابقة",
+              "指令",
+              "指示",
+              "说明",
+              "提示"
+            ]
           },
           {
             "type": "regex",
-            "pattern": "(no (le )?(digas|digan|informes|cuentes) (nada )?al usuario|ne (le )?dis (rien )?pas à l'utilisateur|sans (le )?dire à l'utilisateur|(sag|sage|sagen sie) dem (benutzer|nutzer) nichts|non dirlo all'utente|não (conte|diga|informe) ao usuário|不要告诉用户|别告诉用户|не говори(те)? пользователю|ユーザーに(言わ|伝え)ないで)"
+            "pattern": "(no (le )?(digas|digan|informes|cuentes) (nada )?al usuario|ne (le )?dis (rien )?pas à l'utilisateur|sans (le )?dire à l'utilisateur|(sag|sage|sagen sie) dem (benutzer|nutzer) nichts|non dirlo all'utente|não (conte|diga|informe) ao usuário|不要告诉用户|别告诉用户|не говори(те)? пользователю|ユーザーに(言わ|伝え)ないで)",
+            "anchors": [
+              "usu",
+              "e d",
+              "nutzer nic",
+              "пользовате",
+              "ユーザーに",
+              "l'ut",
+              "告诉用户"
+            ]
           }
         ]
       },
@@ -849,11 +904,32 @@
         "of": [
           {
             "type": "regex",
-            "pattern": "(ignor(a|e|en|ad) (todas )?(las )?instrucciones (anteriores|previas)|ignor(e|a|em) (todas )?(as )?instru(ç|c)(õ|o)es anteriores|ignor(e|ez|er) (toutes )?les instructions (précédentes|precedentes|antérieures)|ignorier(e|en) (sie )?(alle )?(vorherigen|bisherigen|früheren) (anweisungen|instruktionen)|ignora (tutte )?le istruzioni precedenti|игнорир[а-я]* (все )?(предыдущие|прежние) (инструкции|указания)|忽略(之前|以前|先前|上面|上述)?的?(所有|全部)?的?(指令|指示|说明|提示)|(以前|これまで|前|上記)の(すべての|全ての)?(指示|命令)を無視|이전의? (모든 )?(지시|명령)(를|을)? 무시|पिछले (सभी )?निर्देशों को (अनदेखा|नजरअंदाज|नज़रअंदाज़)|تجاهل (جميع|كل) (التعليمات|الأوامر) السابقة)"
+            "pattern": "(ignor(a|e|en|ad) (todas )?(las )?instrucciones (anteriores|previas)|ignor(e|a|em) (todas )?(as )?instru(ç|c)(õ|o)es anteriores|ignor(e|ez|er) (toutes )?les instructions (précédentes|precedentes|antérieures)|ignorier(e|en) (sie )?(alle )?(vorherigen|bisherigen|früheren) (anweisungen|instruktionen)|ignora (tutte )?le istruzioni precedenti|игнорир[а-я]* (все )?(предыдущие|прежние) (инструкции|указания)|忽略(之前|以前|先前|上面|上述)?的?(所有|全部)?的?(指令|指示|说明|提示)|(以前|これまで|前|上記)の(すべての|全ての)?(指示|命令)を無視|이전의? (모든 )?(지시|명령)(를|을)? 무시|पिछले (सभी )?निर्देशों को (अनदेखा|नजरअंदाज|नज़रअंदाज़)|تجاهل (جميع|كل) (التعليمات|الأوامر) السابقة)",
+            "anchors": [
+              "ignor",
+              "を無視",
+              "이전",
+              "пре",
+              "िर्देशों क",
+              "السابقة",
+              "指令",
+              "指示",
+              "说明",
+              "提示"
+            ]
           },
           {
             "type": "regex",
-            "pattern": "(no (le )?(digas|digan|informes|cuentes) (nada )?al usuario|ne (le )?dis (rien )?pas à l'utilisateur|sans (le )?dire à l'utilisateur|(sag|sage|sagen sie) dem (benutzer|nutzer) nichts|non dirlo all'utente|não (conte|diga|informe) ao usuário|不要告诉用户|别告诉用户|не говори(те)? пользователю|ユーザーに(言わ|伝え)ないで)"
+            "pattern": "(no (le )?(digas|digan|informes|cuentes) (nada )?al usuario|ne (le )?dis (rien )?pas à l'utilisateur|sans (le )?dire à l'utilisateur|(sag|sage|sagen sie) dem (benutzer|nutzer) nichts|non dirlo all'utente|não (conte|diga|informe) ao usuário|不要告诉用户|别告诉用户|не говори(те)? пользователю|ユーザーに(言わ|伝え)ないで)",
+            "anchors": [
+              "usu",
+              "e d",
+              "nutzer nic",
+              "пользовате",
+              "ユーザーに",
+              "l'ut",
+              "告诉用户"
+            ]
           }
         ]
       },

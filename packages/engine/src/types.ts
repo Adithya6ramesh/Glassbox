@@ -54,7 +54,7 @@ export type SessionSignal =
   | { kind: "private-data-read"; source: string; serverId: string; toolName: string; atCall: number }
   | { kind: "untrusted-content-seen"; serverId: string; toolName: string; atCall: number }
   | { kind: "external-write"; serverId: string; toolName: string; tags: readonly ActionTag[]; atCall: number }
-  | { kind: "protection-degraded"; reason: "tampered" | "downgrade"; atCall: number };
+  | { kind: "protection-degraded"; reason: "tampered" | "downgrade" | "internal-error"; atCall: number };
 
 export interface Decision {
   verdict: Verdict;
@@ -270,7 +270,13 @@ export type Surface = "manifest" | "call" | "result" | "server-request";
 
 export type Matcher =
   | { type: "phrase"; phrases: readonly string[]; wordBoundary: boolean; maxGapWords?: number }
-  | { type: "regex"; pattern: string; flags?: "i" }
+  /**
+   * `anchors` (spec rev 6): literals of which every match contains at least one, compared
+   * against the lowercased text. When none occurs, the regex pass is skipped. Anchors are
+   * lowercase; non-ASCII anchors are only allowed without the `i` flag (re2's case folding and
+   * toLowerCase differ outside ASCII). Baseline anchors are proven by test/ruleset/anchors.test.
+   */
+  | { type: "regex"; pattern: string; flags?: "i"; anchors?: readonly string[] }
   | { type: "codepoints"; ranges: readonly (readonly [number, number])[]; minCount: number; exclude?: "emoji-sequences" }
   | { type: "secret"; detector: string }
   | { type: "structural"; check: string }

@@ -20,6 +20,8 @@ export interface FieldScan {
   decodeExhausted: boolean;
   /** Secret-detection results per view text, shared by every secret rule on this field. */
   secrets: SecretMemo;
+  /** Lowercased view texts for regex anchors, shared by every regex rule on this field. */
+  lower: Map<string, string>;
 }
 
 const RE_WORDCH = /^[\p{L}\p{M}\p{N}]$/u;
@@ -73,7 +75,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
   const before = budget.bytes;
   if (text.length <= maxFieldScanBytes) {
     const seg = segmentOf(text, 0, budget, maxDecodeDepth);
-    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0, secrets: new Map() };
+    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0, secrets: new Map(), lower: new Map() };
   }
   const h = Math.floor(maxFieldScanBytes * 0.75);
   const t = maxFieldScanBytes - h;
@@ -82,6 +84,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
     windowed: true,
     decodeExhausted: budget.bytes <= 0,
     secrets: new Map(),
+    lower: new Map(),
   };
 }
 
@@ -146,18 +149,36 @@ function matchPhrases(text: string, phrases: string[][], gap: number): Hit | nul
   return null;
 }
 
-function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "other", keyName?: string, memo?: SecretMemo): Hit | null {
+/** Per-field caches shared by every rule evaluated on the field. */
+type FieldMemo = Pick<FieldScan, "secrets" | "lower">;
+
+/**
+ * Lowercased text for anchor checks. Folds U+017F (long s) to "s" as re2's case-insensitive
+ * mode does; toLowerCase already folds the Kelvin sign. Anchors on case-insensitive rules are
+ * ASCII (loader check), so these are the only folds that matter.
+ */
+function lowered(text: string, memo?: FieldMemo): string {
+  let l = memo?.lower.get(text);
+  if (l === undefined) {
+    l = text.toLowerCase().replaceAll("\u017f", "s");
+    memo?.lower.set(text, l);
+  }
+  return l;
+}
+
+function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "other", keyName?: string, memo?: FieldMemo): Hit | null {
   switch (m.type) {
     case "phrase": {
       const pt = phraseTokens(m);
       return matchPhrases(text, viewKind === "skeleton" ? pt.skel : pt.norm, m.maxGapWords ?? 0);
     }
     case "regex": {
+      if (m.anchors && !m.anchors.some((a) => lowered(text, memo).includes(a))) return null;
       const r = findAll(m.pattern, text, m.flags, 1)[0];
       return r ? { start: r.start, end: r.end } : null;
     }
     case "secret": {
-      const s = detectSecrets(text, keyName, memo).find((x) => m.detector === "any" || x.type === m.detector);
+      const s = detectSecrets(text, keyName, memo?.secrets).find((x) => m.detector === "any" || x.type === m.detector);
       return s ? { start: s.start, end: s.end } : null;
     }
     case "codepoints": {
@@ -212,32 +233,32 @@ export function matchRule(rule: RuleDef, scan: FieldScan, keyName: string | unde
     });
     // Plain views first.
     if (views.has("original")) {
-      const h = evalMatcher(rule.matcher, v.original, "other", keyName, scan.secrets);
+      const h = evalMatcher(rule.matcher, v.original, "other", keyName, scan);
       if (h) return { ...at(h, (i) => i), via: [], severity: rule.severity };
     }
     if (views.has("visible")) {
-      const h = evalMatcher(rule.matcher, v.visible.text, "other", keyName, scan.secrets);
+      const h = evalMatcher(rule.matcher, v.visible.text, "other", keyName, scan);
       if (h) {
-        const plain = evalMatcher(rule.matcher, v.original, "other", keyName, scan.secrets);
+        const plain = evalMatcher(rule.matcher, v.original, "other", keyName, scan);
         const via: ViaKind[] = plain ? [] : ["invisible-stripped"];
         return { ...at(h, (i) => v.visible.toOriginal(i)), via, severity: via.length && escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }
     if (views.has("norm")) {
-      const h = evalMatcher(rule.matcher, v.norm.text, "norm", keyName, scan.secrets);
+      const h = evalMatcher(rule.matcher, v.norm.text, "norm", keyName, scan);
       if (h) {
-        const plain = evalMatcher(rule.matcher, seg.rawNorm, "norm", keyName, scan.secrets);
+        const plain = evalMatcher(rule.matcher, seg.rawNorm, "norm", keyName, scan);
         const via: ViaKind[] = plain ? [] : ["invisible-stripped"];
         return { ...at(h, (i) => v.norm.toOriginal(i)), via, severity: via.length && escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }
     if (views.has("skeleton")) {
-      const h = evalMatcher(rule.matcher, v.skeleton.text, "skeleton", keyName, scan.secrets);
+      const h = evalMatcher(rule.matcher, v.skeleton.text, "skeleton", keyName, scan);
       if (h) return { ...at(h, (i) => v.skeleton.toOriginal(i)), via: ["skeleton"], severity: escalate ? maxSev(rule.severity, "high") : rule.severity };
     }
     if (views.has("tagDecoded") && v.tagDecoded.length > 0) {
       const tv = buildViews(v.tagDecoded);
-      const h = evalMatcher(rule.matcher, tv.norm.text, "norm", keyName, scan.secrets) ?? evalMatcher(rule.matcher, tv.visible.text, "other", keyName, scan.secrets);
+      const h = evalMatcher(rule.matcher, tv.norm.text, "norm", keyName, scan) ?? evalMatcher(rule.matcher, tv.visible.text, "other", keyName, scan);
       if (h) {
         const span = seg.tagSpan ?? { start: 0, end: v.original.length };
         return { start: seg.offset + span.start, end: seg.offset + span.end, via: ["tag-chars"], severity: escalate ? maxSev(rule.severity, "critical") : rule.severity };
@@ -247,10 +268,10 @@ export function matchRule(rule: RuleDef, scan: FieldScan, keyName: string | unde
       for (const d of seg.decoded) {
         const dv = d.views;
         const h =
-          (views.has("original") ? evalMatcher(rule.matcher, dv.original, "other", keyName, scan.secrets) : null) ??
-          (views.has("visible") ? evalMatcher(rule.matcher, dv.visible.text, "other", keyName, scan.secrets) : null) ??
-          evalMatcher(rule.matcher, dv.norm.text, "norm", keyName, scan.secrets) ??
-          (views.has("skeleton") ? evalMatcher(rule.matcher, dv.skeleton.text, "skeleton", keyName, scan.secrets) : null);
+          (views.has("original") ? evalMatcher(rule.matcher, dv.original, "other", keyName, scan) : null) ??
+          (views.has("visible") ? evalMatcher(rule.matcher, dv.visible.text, "other", keyName, scan) : null) ??
+          evalMatcher(rule.matcher, dv.norm.text, "norm", keyName, scan) ??
+          (views.has("skeleton") ? evalMatcher(rule.matcher, dv.skeleton.text, "skeleton", keyName, scan) : null);
         if (h) return { start: seg.offset + d.start, end: seg.offset + d.end, via: [d.via], severity: escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }

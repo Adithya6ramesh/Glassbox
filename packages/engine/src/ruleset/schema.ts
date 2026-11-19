@@ -14,7 +14,7 @@ const VIEWS = ["norm", "skeleton", "visible", "original", "tagDecoded", "decoded
 const MatcherSchema: v.GenericSchema<Matcher> = v.lazy(() =>
   v.variant("type", [
     v.object({ type: v.literal("phrase"), phrases: v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(200))), v.minLength(1), v.maxLength(500)), wordBoundary: v.boolean(), maxGapWords: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(5))) }),
-    v.object({ type: v.literal("regex"), pattern: v.pipe(v.string(), v.minLength(1), v.maxLength(2000)), flags: v.optional(v.literal("i")) }),
+    v.object({ type: v.literal("regex"), pattern: v.pipe(v.string(), v.minLength(1), v.maxLength(2000)), flags: v.optional(v.literal("i")), anchors: v.optional(v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(64))), v.minLength(1), v.maxLength(64))) }),
     v.object({ type: v.literal("codepoints"), ranges: v.array(v.tuple([v.number(), v.number()])), minCount: v.number(), exclude: v.optional(v.literal("emoji-sequences")) }),
     v.object({ type: v.literal("secret"), detector: v.string() }),
     v.object({ type: v.literal("structural"), check: v.string() }),
