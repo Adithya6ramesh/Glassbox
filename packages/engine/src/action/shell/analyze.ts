@@ -232,6 +232,11 @@ function handleRedirect(r: Redirect, st: ShellState, acc: Acc, pctx: PathCtx, cm
   if (isWrite) {
     if (np === null) { acc.unanalyzable("writes to a path that isn't known statically"); return; }
     if (/^\/dev\/(sd|nvme|hd|disk|xvd|vd|mmcblk)/.test(np.path ?? "")) { destroy(acc, "overwrites a disk device"); return; }
+    if (np.path === "/proc/sysrq-trigger") { acc.tag("high-risk", "infra.change"); acc.reason("triggers a kernel reboot, power-off or crash through sysrq"); return; }
+    if ((r.op === ">" || r.op === ">|") && np.path !== null && isLogOrHistory(np.path)) {
+      acc.tag("high-risk", "fs.delete");
+      acc.find("CP-ACTION-030", "empties a log or shell history file");
+    }
     writeTarget(np, acc, pctx);
     acc.tag("write-reversible", "fs.write");
     return;
@@ -351,6 +356,15 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   const flagsOnly = (allowed: string[]) => args.every((a) => a.value !== null && allowed.includes(a.value));
   if ((lower === "printenv" && args.length === 0) || (["set", "export", "declare", "typeset"].includes(lower) && flagsOnly(["-p", "-x", "-px", "-xp"]))) acc.envDump = true;
   if (lower === "compgen" && hasFlag(args, "-e", "-v")) acc.envDump = true;
+
+  // Credential dumping tools, run directly or as a script (python laZagne.py).
+  if ([name, ...args.map((a) => a.value ?? "")].some((v) => /^(lazagne|mimikatz|pypykatz|secretsdump|procdump)/i.test(v.slice(v.lastIndexOf("/") + 1)))) {
+    acc.tags.add("fs.read.sensitive");
+    acc.raise("high-risk");
+    acc.sensitive.push("credential-dump");
+    acc.sensitiveArgs = true;
+    acc.find("CP-EXFIL-040", "runs a credential dumping tool");
+  }
 
   // Clearing shell history or system logs hides what happened (warn, CP-ACTION-030).
   const clearsHistory = (lower === "history" && args.some((a) => /^-[a-z]*c/.test(a.value ?? "") || a.value === "-d")) ||
@@ -575,9 +589,31 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
   if (WRITE.has(lower)) return writeOps(operands(args, new Set(["-t", "--target-directory", "-m", "--mode", "-S", "--suffix", "-o", "-g", "-p"])), c, "fs.write");
   if (READ.has(lower)) return;
-  if (["kill", "pkill", "killall", "systemctl", "service", "launchctl", "shutdown", "reboot", "halt"].includes(lower)) {
-    if (["shutdown", "reboot", "halt"].includes(lower)) acc.tag("high-risk", "infra.change");
+  if (["kill", "pkill", "killall", "systemctl", "service", "launchctl", "shutdown", "reboot", "halt", "poweroff", "init", "telinit"].includes(lower)) {
+    const vals = args.map((a) => (a.value ?? "").toLowerCase());
+    const power = ["shutdown", "reboot", "halt", "poweroff"].includes(lower) || ((lower === "init" || lower === "telinit") && ["0", "6"].includes(vals[0] ?? ""));
+    const sysctlPower = lower === "systemctl" && vals.some((v) => ["poweroff", "reboot", "halt", "kexec", "suspend", "hibernate", "emergency", "rescue"].includes(v));
+    const stopsService = (lower === "systemctl" && vals.some((v) => ["stop", "disable", "mask", "kill"].includes(v))) || (lower === "service" && vals.includes("stop"));
+    if (power || sysctlPower) { acc.tag("high-risk", "infra.change"); acc.reason("powers off or restarts the machine"); }
+    else if (stopsService) { acc.tag("high-risk", "infra.change"); acc.reason("stops or disables a system service"); }
     else acc.tag("write-reversible", "exec.unknown");
+    return;
+  }
+  // Scheduled and timed jobs are persistence (CP-SELF-004), like crontab.
+  if ((lower === "systemd-run" && args.some((a) => /^--on-(calendar|active|boot|startup|unit-active|unit-inactive)/.test(a.value ?? ""))) ||
+      ((lower === "at" || lower === "batch") && args.length > 0 && !args.every((a) => ["-l", "-V"].includes(a.value ?? ""))) ||
+      (lower === "schtasks" && args.some((a) => /^[/-]create$/i.test(a.value ?? ""))) ||
+      (lower === "sc" && (args[0]?.value ?? "").toLowerCase() === "create")) {
+    acc.protect("CP-SELF-004", "schedules a job or installs a service that runs later");
+    return;
+  }
+  // Deleting backups, shadow copies or recovery settings: irreversible (ask).
+  if ((lower === "vssadmin" && args.some((a) => /^(delete|resize)$/i.test(a.value ?? ""))) || lower === "diskshadow" ||
+      (lower === "wbadmin" && args.some((a) => /^delete$/i.test(a.value ?? ""))) ||
+      (lower === "wmic" && args.some((a) => /^shadowcopy$/i.test(a.value ?? "")) && args.some((a) => /^delete$/i.test(a.value ?? ""))) ||
+      (lower === "bcdedit" && args.some((a) => /recoveryenabled|bootstatuspolicy/i.test(a.value ?? "")))) {
+    acc.tag("high-risk", "fs.destroy");
+    acc.reason("deletes backups, shadow copies or recovery settings");
     return;
   }
   acc.tag("write-reversible", "exec.unknown");

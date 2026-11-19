@@ -475,6 +475,15 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     }
     return;
   }
+  if (cmdlet === "register-scheduledtask" || cmdlet === "register-scheduledjob" || cmdlet === "new-service") {
+    acc.protect("CP-SELF-004", `${cmdlet} installs a task or service that runs later`);
+    return;
+  }
+  if (cmdlet === "clear-history" || (cmdlet === "set-psreadlineoption" && (hasParam(params, "-AddToHistoryHandler") || /savenothing/i.test(el.map((t) => tokText(t).value ?? "").join(" "))))) {
+    acc.tag("high-risk", "fs.delete");
+    acc.find("CP-ACTION-030", `${cmdlet} clears or stops PowerShell history`);
+    return;
+  }
   if (DISK_WIPE.has(cmdlet)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", `${cmdlet} erases a disk, partition or the recycle bin`); return; }
   if (SYSTEM_STATE.has(cmdlet)) { acc.tag("high-risk", "infra.change"); acc.reason(`${cmdlet} changes the machine's power or service state`); return; }
   if (TAMPER.has(cmdlet)) { acc.tag("high-risk", "perm.change"); acc.reason(`${cmdlet} changes logs, Defender settings or accounts`); return; }

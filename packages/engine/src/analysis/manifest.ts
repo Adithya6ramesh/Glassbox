@@ -16,6 +16,39 @@ import { scanFields } from "./scan.js";
 
 const BUILTIN_TOOL_NAMES = ["Bash", "PowerShell", "Write", "Edit", "MultiEdit", "Read", "WebFetch", "WebSearch", "Grep", "Glob", "Agent", "Task", "NotebookEdit"];
 const DIRECTIVE_WORDS = new Set(["instead", "always", "before", "after", "deprecated", "must", "never", "don't", "dont", "should", "replace", "override", "first"]);
+const STRONG_DIRECTIVES = new Set(["must", "always", "before", "instead", "first", "mandatory", "required", "never", "redirect", "redirected", "priority", "replace", "prior"]);
+const IDENT = /^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+$/;
+
+/** Identifiers with a _ or - inside backticks or quotes: `send_email`, 'read_file', "map-traffic". */
+function quotedIdentifiers(text: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length && out.length < 20; i++) {
+    const q = text[i];
+    if (q !== "`" && q !== "'" && q !== '"') continue;
+    const end = text.indexOf(q as string, i + 1);
+    if (end < 0) break;
+    if (end - i - 1 <= 64) {
+      const inner = text.slice(i + 1, end);
+      if (IDENT.test(inner)) out.push(inner);
+    }
+    i = end;
+  }
+  return out;
+}
+
+/** Every property name and string value in a schema (bounded). */
+function schemaStrings(schema: unknown): string[] {
+  const out: string[] = [];
+  const stack: unknown[] = [schema];
+  while (stack.length > 0 && out.length < 2000) {
+    const v = stack.pop();
+    if (typeof v === "string") out.push(v);
+    else if (Array.isArray(v)) stack.push(...v.slice(0, 200));
+    else if (isRecord(v)) for (const k of Object.keys(v).slice(0, 200)) { out.push(k); stack.push(v[k]); }
+  }
+  return out;
+}
+
 const PURPOSE_HARMLESS = new Set(["time", "date", "clock", "timezone", "math", "calculate", "calculator", "add", "sum", "multiply", "convert", "format", "weather", "forecast", "random", "uuid", "echo", "ping", "joke", "quote", "temperature", "unit", "units", "color", "colour"]);
 const CAP_PARAMS: [RegExp, string][] = [
   [/^(command|cmd|shell|script|code|exec|eval|bash|powershell)$/i, "exec"],
@@ -177,6 +210,19 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
         break;
       }
       if (hit) { findings.push(ff.make({ ruleId: "CP-SHADOW-001", location: s.pointer, text: s.text, start: s.text.indexOf(hit), end: s.text.indexOf(hit) + hit.length })); break; }
+    }
+
+    // Directives about a tool named in quotes that isn't this tool (rev 7, from MCPTox): works
+    // without knowing the other server. Names and values from the tool's own schema don't count.
+    if (!findings.some((f) => f?.ruleId === "CP-SHADOW-001" && f.location.startsWith(base))) {
+      const own = new Set<string>([name.toLowerCase(), ...schemaStrings(get(t, "inputSchema")).map((x) => x.toLowerCase())]);
+      for (const s of strs) {
+        const text = s.text.slice(0, limits.maxFieldScanBytes);
+        const lowerWords = new Set(tokenize(text).map((w) => w.w.toLowerCase()));
+        if (![...STRONG_DIRECTIVES].some((d) => lowerWords.has(d))) continue;
+        const ref = quotedIdentifiers(text).find((q) => !own.has(q.toLowerCase()));
+        if (ref) { findings.push(ff.make({ ruleId: "CP-SHADOW-002", location: s.pointer, text, start: text.indexOf(ref), end: text.indexOf(ref) + ref.length })); break; }
+      }
     }
 
     // Collisions and typosquats against other servers' tools.

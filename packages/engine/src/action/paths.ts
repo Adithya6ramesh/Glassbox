@@ -257,7 +257,7 @@ const HOME_FILES: [string, string][] = [
 //    edit these by hand routinely, so the user decides; autopilot denies (R15).
 const DENY_HOME_FILES = [".ssh/rc", ".ssh/authorized_keys", ".ssh/authorized_keys2", ".ssh/config"];
 const ASK_HOME_FILES = [
-  ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout",
+  ".bashrc", ".shrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout",
   ".kshrc", ".cshrc", ".tcshrc", ".xprofile", ".xinitrc", ".xsessionrc", ".config/fish/config.fish", ".gitconfig", ".config/git/config",
 ];
 const DENY_HOME_DIRS = [".config/systemd/user", ".config/autostart", "library/launchagents", "appdata/roaming/microsoft/windows/start menu/programs/startup"];
