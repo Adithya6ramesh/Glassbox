@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     name: "engine",
     include: ["test/**/*.test.ts"],
+    setupFiles: ["../../vitest.seed.ts"],
   },
 });

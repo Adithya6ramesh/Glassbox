@@ -57,7 +57,7 @@ export default tseslint.config(
   },
   {
     // Dev-time Node scripts (never part of the engine).
-    files: ["packages/*/scripts/**/*.mjs"],
+    files: ["packages/*/scripts/**/*.mjs", "scripts/**/*.mjs"],
     languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } },
   },
   {

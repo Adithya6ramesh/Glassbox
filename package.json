@@ -12,7 +12,8 @@
     "build": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
-    "check": "eslint . && tsc -b && vitest run"
+    "check": "eslint . && tsc -b && vitest run",
+    "stress": "node scripts/stress.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
