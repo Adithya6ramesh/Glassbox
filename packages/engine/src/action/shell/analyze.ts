@@ -1,5 +1,6 @@
 // Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
 import { Acc } from "../acc.js";
+import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
   coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
@@ -248,7 +249,7 @@ function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): voi
   const persist = persistenceLabel(np, pctx);
   if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
-  const home = pctx.homeDir.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
   const deferred =
     p.includes("/.git/hooks/") || p.endsWith("/.git/config") || p.includes("/.husky/") || p.endsWith("/.pre-commit-config.yaml") || p.endsWith("/.envrc") ||
@@ -708,7 +709,7 @@ function protectedText(text: string, pctx: PathCtx): boolean {
 function projectTool(rest: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   const h = rest[0];
   if (!h || h.value === null) { c.acc.unanalyzable("package runner with a non-literal package"); return; }
-  const n = h.value.replace(/@[^/]*$/, "").split("/").pop() ?? "";
+  const n = (() => { const v = h.value as string; const slash = v.lastIndexOf("/"); const at = v.indexOf("@", slash + 1); return (at >= 0 ? v.slice(0, at) : v).split("/").pop() ?? ""; })();
   if (PROJECT.has(n) || READ.has(n)) { c.acc.tag("write-reversible", "exec.project-code"); return; }
   if (unwrapDepth < 4 && (n === "rimraf" || n === "del-cli")) { c.acc.tag("high-risk", "fs.delete"); return; }
   c.acc.tag("write-reversible", "exec.project-code");

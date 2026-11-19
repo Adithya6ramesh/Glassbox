@@ -92,8 +92,12 @@ const DETECTORS: Detector[] = [
     pattern: "(?:postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|redis|rediss|amqps?|mssql)://([^:@/\\s\"']+):([^@\\s\"']+)@[^\\s/\"']+",
     confidence: 0.9,
     validate: (v) => {
-      const m = /:\/\/[^:@/\s]+:([^@\s]+)@/.exec(v.slice(0, 512));
-      const pw = m?.[1] ?? "";
+      // user:password@ right after the scheme, parsed without a regex (linear).
+      const head = v.slice(0, 512);
+      const auth = head.slice(head.indexOf("://") + 3);
+      const at = auth.indexOf("@");
+      const colon = auth.indexOf(":");
+      const pw = at > 0 && colon > 0 && colon < at && !/[\s/]/.test(auth.slice(0, at)) ? auth.slice(colon + 1, at) : "";
       return pw.length === 0 || PLACEHOLDER.test(pw) ? -1 : null;
     },
   },

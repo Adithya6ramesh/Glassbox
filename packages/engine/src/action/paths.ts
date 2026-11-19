@@ -1,5 +1,6 @@
 // Path normalization and the protected / protected-read / sensitive sets (engine-spec §7.2, §7.6).
 // Purely lexical: the engine can't see the filesystem.
+import { trimEndChars } from "../util/misc.js";
 
 export interface PathCtx {
   platform: "linux" | "darwin" | "win32";
@@ -52,7 +53,7 @@ function collapse(p: string, win: boolean): string {
     let seg = seg0;
     if (win) {
       if (idx === segs.length - 1) seg = seg.replace(/::\$DATA$/i, "").replace(/:[^:/]*$/, "");
-      seg = seg.replace(/[. ]+$/, (m) => (seg === "." || seg === ".." ? m : ""));
+      seg = seg === "." || seg === ".." ? seg : trimEndChars(seg, ". ");
     }
     if (seg === "" || seg === ".") return;
     if (seg === "..") { out.pop(); return; }
@@ -62,7 +63,7 @@ function collapse(p: string, win: boolean): string {
 }
 
 function expandHome(p: string, home: string): { s: string; unknownUser: boolean } {
-  const h = home.replace(/[\\/]+$/, "");
+  const h = trimEndChars(home, "\\/");
   for (const pre of ["$HOME", "${HOME}", "%USERPROFILE%", "$env:USERPROFILE", "${env:USERPROFILE}", "%HOMEDRIVE%%HOMEPATH%"]) {
     if (p === pre || p.startsWith(pre + "/") || p.startsWith(pre + "\\")) return { s: h + p.slice(pre.length), unknownUser: false };
     if (p.toLowerCase().startsWith(pre.toLowerCase()) && pre.startsWith("$env:")) {
@@ -86,7 +87,7 @@ export function normalizeFull(raw: string, ctx: PathCtx): string | null {
   let s = normalizeSlashes(expanded, win);
   if (!isAbsolute(s, win)) {
     if (ctx.cwd === null) return null;
-    s = normalizeSlashes(ctx.cwd, win).replace(/\/+$/, "") + "/" + s;
+    s = trimEndChars(normalizeSlashes(ctx.cwd, win), "/") + "/" + s;
   }
   s = collapse(s, win);
   s = s.normalize("NFC");
@@ -101,7 +102,7 @@ export function normalizePath(raw: string, ctx: PathCtx): NormPath {
   const relativeUnknown = path === null && !raw.startsWith("~") && !isAbsolute(normalizeSlashes(expandHome(raw, ctx.homeDir).s, win), win);
   let suffix: string | null = null;
   if (path === null) suffix = fold("/" + collapse(slashed.replace(/^~[^/]*\/?/, ""), win).replace(/^\/+/, ""), ctx.caseInsensitive);
-  return { path, suffix, relativeUnknown, basename: fold(base.replace(/[. ]+$/, ""), ctx.caseInsensitive) };
+  return { path, suffix, relativeUnknown, basename: fold(trimEndChars(base, ". "), ctx.caseInsensitive) };
 }
 
 /** A path known only by its literal tail (e.g. "$(…)/.claude/settings.json"). */
@@ -218,7 +219,7 @@ export function isProtectedRead(np: NormPath, ctx: PathCtx): boolean {
 export function coversProtectedRead(np: NormPath, ctx: PathCtx): boolean {
   if (isProtectedRead(np, ctx)) return true;
   if (np.path === null) return np.suffix !== null && (np.suffix.endsWith("/.glassbox") || np.suffix.includes("/.glassbox/"));
-  const root = np.path.replace(/\/+$/, "");
+  const root = trimEndChars(np.path, "/");
   const ents = readProtectedEntries(ctx);
   return ents.some((e) => {
     const target = e.p.endsWith("/*.key") ? e.p.slice(0, -6) : e.p;
@@ -228,7 +229,7 @@ export function coversProtectedRead(np: NormPath, ctx: PathCtx): boolean {
 
 /** A glob pattern (e.g. Glob tool) that could match a protected-read path. */
 export function globCoversProtectedRead(pattern: string, base: string | null, ctx: PathCtx): boolean {
-  const full = base ? `${base.replace(/[\\/]+$/, "")}/${pattern}` : pattern;
+  const full = base ? `${trimEndChars(base, "\\/")}/${pattern}` : pattern;
   const literalPrefix = full.split(/[*?[{]/)[0] ?? "";
   const np = normalizePath(literalPrefix.length > 0 ? literalPrefix : ".", ctx);
   if (coversProtectedRead(np, ctx)) return true;
@@ -269,7 +270,7 @@ const PERSIST_SYSTEM = [
 
 /** A label when writing `np` would install persistence or change remote access, else null. */
 export function persistenceLabel(np: NormPath, ctx: PathCtx): string | null {
-  const lower = (np.path ?? np.suffix ?? "").toLowerCase().replace(/\/+$/, "");
+  const lower = trimEndChars((np.path ?? np.suffix ?? "").toLowerCase(), "/");
   if (lower === "") return null;
   const home = (normalizeFull(ctx.homeDir, { ...ctx, cwd: "/" }) ?? "").toLowerCase();
   if (np.path !== null) {

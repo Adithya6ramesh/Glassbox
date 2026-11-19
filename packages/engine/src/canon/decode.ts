@@ -1,5 +1,6 @@
 // C5 (engine-spec §5.5): find encoded blobs with a linear scanner and decode them.
 // Kept only if the result is valid UTF-8 with ≥ 80% printable code points.
+import { trimEndChars } from "../util/misc.js";
 
 export interface Decoded { start: number; end: number; via: "base64" | "hex" | "url"; text: string }
 
@@ -38,7 +39,8 @@ function utf8Strict(bytes: Uint8Array): string | null {
 }
 
 export function decodeBase64(s: string): Uint8Array | null {
-  let t = s.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+  let t = s.replace(/-/g, "+").replace(/_/g, "/");
+  t = trimEndChars(t, "=");
   if (t.length % 4 === 1) return null;
   while (t.length % 4 !== 0) t += "=";
   try {
@@ -81,7 +83,7 @@ export function findDecodable(text: string, budget: { bytes: number }): Decoded[
         const pieces: { s: string; off: number }[] = [{ s: run, off: 0 }];
         let off = 0;
         for (const part of run.split("=")) {
-          if (part.length >= 20) pieces.push({ s: run.slice(off, off + part.length) + run.slice(off + part.length).replace(/^(=*).*$/, "$1").slice(0, 2), off });
+          if (part.length >= 20) pieces.push({ s: run.slice(off, off + part.length) + (() => { const rest = run.slice(off + part.length, off + part.length + 2); let k = 0; while (k < rest.length && rest[k] === "=") k++; return rest.slice(0, k); })(), off });
           off += part.length + 1;
         }
         for (const piece of pieces) {
