@@ -128,8 +128,54 @@ function phraseTokens(m: Extract<Matcher, { type: "phrase" }>): { norm: string[]
 
 interface Hit { start: number; end: number }
 
+// Spec rev 6, Q3 item 4: disguised words. Letters joined by one separator ("I-g-n-o-r-e",
+// "i.g.n.o.r.e") become one word; words mixing letters and digits are de-leeted ("1gn0r3").
+const LEET: Readonly<Record<string, string>> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t" };
+const isDigit = (c: string) => c >= "0" && c <= "9";
+
+function joinSpelledOut(text: string, toks: Token[]): Token[] | null {
+  const out: Token[] = [];
+  let changed = false;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i] as Token;
+    if (t.w.length !== 1) { out.push(t); continue; }
+    let j = i;
+    let w = t.w;
+    while (j + 1 < toks.length && (toks[j + 1] as Token).w.length === 1) {
+      const gapText = text.slice((toks[j] as Token).end, (toks[j + 1] as Token).start);
+      if (gapText.length !== 1 || gapText.trim() === "") break;
+      j++;
+      w += (toks[j] as Token).w;
+    }
+    if (j - i >= 2) { out.push({ w, start: t.start, end: (toks[j] as Token).end }); changed = true; i = j; } else out.push(t);
+  }
+  return changed ? out : null;
+}
+
+function deLeet(toks: Token[]): Token[] | null {
+  let changed = false;
+  const out = toks.map((t) => {
+    if (![...t.w].some(isDigit) || [...t.w].every(isDigit)) return t;
+    const w = [...t.w].map((c) => LEET[c] ?? c).join("");
+    if (w === t.w) return t;
+    changed = true;
+    return { ...t, w };
+  });
+  return changed ? out : null;
+}
+
 function matchPhrases(text: string, phrases: string[][], gap: number): Hit | null {
-  const toks = tokenize(text);
+  const base = tokenize(text);
+  const spelled = joinSpelledOut(text, base);
+  const variants = [base, spelled, deLeet(spelled ?? base)].filter((v): v is Token[] => v !== null);
+  for (const toks of variants) {
+    const h = matchTokens(toks, phrases, gap);
+    if (h) return h;
+  }
+  return null;
+}
+
+function matchTokens(toks: Token[], phrases: string[][], gap: number): Hit | null {
   for (let i = 0; i < toks.length; i++) {
     for (const ph of phrases) {
       if (ph.length === 0 || toks[i]?.w !== ph[0]) continue;

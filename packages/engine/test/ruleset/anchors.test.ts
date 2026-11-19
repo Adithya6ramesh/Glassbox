@@ -61,6 +61,13 @@ describe("baseline regex rules", () => {
     expect(r.ok).toBe(true);
   });
 
+  it.each(RULES)("$id: anchors are selective (ASCII anchors have at least 3 characters)", ({ m }) => {
+    // Short anchors are sound but almost always present, so they skip nothing. "![" is the
+    // one deliberate exception (markdown image syntax).
+    const weak = (m.anchors ?? []).filter((a) => a.length < 3 && [...a].every((c) => c >= " " && c <= "~") && a !== "![");
+    expect(weak).toEqual([]);
+  });
+
   it("the loader accepts the baseline anchors", () => {
     expect(validateRules({ ...EMBEDDED_BASELINE, channel: "baseline", rules: EMBEDDED_BASELINE.rules } as never)).toEqual([]);
   });
