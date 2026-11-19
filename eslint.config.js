@@ -57,8 +57,8 @@ export default tseslint.config(
   },
   {
     // Dev-time Node scripts (never part of the engine).
-    files: ["packages/*/scripts/**/*.mjs", "scripts/**/*.mjs"],
-    languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly" } },
+    files: ["packages/*/scripts/**/*.mjs", "scripts/**/*.mjs", "bench/**/*.mjs"],
+    languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly", Buffer: "readonly" } },
   },
   {
     // Tests feed hostile input on purpose (NBSP, control characters, the RFC 8785

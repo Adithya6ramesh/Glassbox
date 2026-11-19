@@ -6,3 +6,4 @@ coverage/
 
 # Internal design docs live outside the public repo.
 docs/
+bench/results/

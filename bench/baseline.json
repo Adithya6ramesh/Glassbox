@@ -1,0 +1,49 @@
+{
+  "note": "Detection gate for `pnpm run bench --check`: per category, the most missed attacks (maxFn) and false positives (maxFp) allowed. Lower these when detection improves; never raise them to make CI pass.",
+  "categories": {
+    "destructive-shell": {
+      "maxFn": 8,
+      "maxFp": 0
+    },
+    "exfil-args": {
+      "maxFn": 8,
+      "maxFp": 3
+    },
+    "exfil-shell": {
+      "maxFn": 5,
+      "maxFp": 0
+    },
+    "hidden-content": {
+      "maxFn": 1,
+      "maxFp": 0
+    },
+    "powershell": {
+      "maxFn": 7,
+      "maxFp": 0
+    },
+    "protected-paths": {
+      "maxFn": 1,
+      "maxFp": 0
+    },
+    "result-injection": {
+      "maxFn": 12,
+      "maxFp": 1
+    },
+    "shadowing": {
+      "maxFn": 3,
+      "maxFp": 0
+    },
+    "shell-obfuscation": {
+      "maxFn": 3,
+      "maxFp": 2
+    },
+    "sql": {
+      "maxFn": 0,
+      "maxFp": 0
+    },
+    "tool-poisoning": {
+      "maxFn": 6,
+      "maxFp": 0
+    }
+  }
+}
