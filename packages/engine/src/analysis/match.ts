@@ -22,6 +22,8 @@ export interface FieldScan {
   secrets: SecretMemo;
   /** Lowercased view texts for regex anchors, shared by every regex rule on this field. */
   lower: Map<string, string>;
+  /** Token lists (plain, spelled-out joined, de-leeted) per view text, shared by phrase rules. */
+  tokens: Map<string, Token[][]>;
 }
 
 const RE_WORDCH = /^[\p{L}\p{M}\p{N}]$/u;
@@ -75,7 +77,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
   const before = budget.bytes;
   if (text.length <= maxFieldScanBytes) {
     const seg = segmentOf(text, 0, budget, maxDecodeDepth);
-    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0, secrets: new Map(), lower: new Map() };
+    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0, secrets: new Map(), lower: new Map(), tokens: new Map() };
   }
   const h = Math.floor(maxFieldScanBytes * 0.75);
   const t = maxFieldScanBytes - h;
@@ -85,6 +87,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
     decodeExhausted: budget.bytes <= 0,
     secrets: new Map(),
     lower: new Map(),
+    tokens: new Map(),
   };
 }
 
@@ -164,11 +167,19 @@ function deLeet(toks: Token[]): Token[] | null {
   return changed ? out : null;
 }
 
-function matchPhrases(text: string, phrases: string[][], gap: number): Hit | null {
-  const base = tokenize(text);
-  const spelled = joinSpelledOut(text, base);
-  const variants = [base, spelled, deLeet(spelled ?? base)].filter((v): v is Token[] => v !== null);
-  for (const toks of variants) {
+function tokenVariants(text: string, memo?: FieldMemo): Token[][] {
+  let v = memo?.tokens.get(text);
+  if (v === undefined) {
+    const base = tokenize(text);
+    const spelled = joinSpelledOut(text, base);
+    v = [base, spelled, deLeet(spelled ?? base)].filter((x): x is Token[] => x !== null);
+    memo?.tokens.set(text, v);
+  }
+  return v;
+}
+
+function matchPhrases(text: string, phrases: string[][], gap: number, memo?: FieldMemo): Hit | null {
+  for (const toks of tokenVariants(text, memo)) {
     const h = matchTokens(toks, phrases, gap);
     if (h) return h;
   }
@@ -196,7 +207,7 @@ function matchTokens(toks: Token[], phrases: string[][], gap: number): Hit | nul
 }
 
 /** Per-field caches shared by every rule evaluated on the field. */
-type FieldMemo = Pick<FieldScan, "secrets" | "lower">;
+type FieldMemo = Pick<FieldScan, "secrets" | "lower" | "tokens">;
 
 /**
  * Lowercased text for anchor checks. Folds U+017F (long s) to "s" as re2's case-insensitive
@@ -216,7 +227,7 @@ function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "
   switch (m.type) {
     case "phrase": {
       const pt = phraseTokens(m);
-      return matchPhrases(text, viewKind === "skeleton" ? pt.skel : pt.norm, m.maxGapWords ?? 0);
+      return matchPhrases(text, viewKind === "skeleton" ? pt.skel : pt.norm, m.maxGapWords ?? 0, memo);
     }
     case "regex": {
       if (m.anchors && !m.anchors.some((a) => lowered(text, memo).includes(a))) return null;
