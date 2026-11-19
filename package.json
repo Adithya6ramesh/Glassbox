@@ -14,7 +14,8 @@
     "test": "vitest run",
     "check": "eslint . && tsc -b && vitest run",
     "stress": "node scripts/stress.mjs",
-    "bench": "tsc -b && node bench/run.mjs"
+    "bench": "tsc -b && node bench/run.mjs",
+    "bench:public": "tsc -b && node bench/public-run.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
