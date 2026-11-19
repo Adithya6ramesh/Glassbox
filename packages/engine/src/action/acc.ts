@@ -13,6 +13,8 @@ export class Acc {
   sensitive: string[] = [];
   network = false;
   sensitiveArgs = false;
+  /** Prints the whole environment (env, printenv, set, export -p): harmless alone, exfiltration next to a network call. */
+  envDump = false;
   /** Paths read that are sensitive (for signals); labels only. */
 
   raise(level: ActionRiskLevel): void {
@@ -57,6 +59,7 @@ export class Acc {
     this.sensitive.push(...o.sensitive);
     this.network ||= o.network;
     this.sensitiveArgs ||= o.sensitiveArgs;
+    this.envDump ||= o.envDump;
   }
 
   get unanalyzableFlag(): boolean {

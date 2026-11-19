@@ -252,7 +252,7 @@ export function analyzePowerShell(src: string, st: PsState): Acc {
   }
   flush(";");
   // Same correlation as bash: a sensitive file and a network call in one command.
-  if (acc.network && acc.sensitiveArgs) acc.find("CP-EXFIL-030", "sensitive file and network call in one command");
+  if (acc.network && (acc.sensitiveArgs || acc.envDump)) acc.find("CP-EXFIL-030", "sensitive file or environment and a network call in one command");
   return acc;
 }
 
