@@ -128,24 +128,32 @@ TOOLS = ["git", "npm", "pnpm", "yarn", "npx", "node", "python", "python3", "pip"
          "git-clone", "git-pull", "git-add", "git-merge", "git-tag", "git-reset", "rustc", "deno", "bun", "uv", "poetry", "ruff", "black"]
 PS = ["get-childitem", "get-content", "set-location", "get-process", "select-string", "copy-item", "move-item", "new-item", "remove-item",
       "invoke-webrequest", "get-command", "get-help", "test-path", "get-location", "measure-object", "sort-object", "where-object"]
+def render(g):
+    # {{[-u|--user]}} is a choice between option spellings: take the first. Other {{text}}
+    # placeholders keep their text. (v1 of this builder dropped the brackets and kept the "|",
+    # which the shell reads as a pipe; ids still use that v1 text so no case changes split.)
+    if g.startswith("[") and g.endswith("]") and "|" in g: return g[1:-1].split("|")[0]
+    return g.replace("[", "").replace("]", "")
 def tldr_examples(path):
     out, lines = [], open(path, encoding="utf8").read().splitlines()
     for ln in lines:
         m = re.match(r"^`(.+)`$", ln.strip())
-        if m: out.append(re.sub(r"\{\{(.*?)\}\}", lambda mm: mm.group(1).replace("[", "").replace("]", ""), m.group(1)))
+        if m:
+            v1 = re.sub(r"\{\{(.*?)\}\}", lambda mm: mm.group(1).replace("[", "").replace("]", ""), m.group(1))
+            out.append((v1, re.sub(r"\{\{(.*?)\}\}", lambda mm: render(mm.group(1)), m.group(1))))
     return out
 for name in TOOLS:
     for sub in ("common", "linux"):
         p = os.path.join(RAW, "tldr", sub, name + ".md")
         if os.path.exists(p):
-            for ex in tldr_examples(p):
-                add("tldr-pages", "CC-BY-4.0", "call", "everyday-shell", "benign", "tldr|" + ex, {"tool": "Bash", "command": ex, "page": f"{sub}/{name}"})
+            for key, ex in tldr_examples(p):
+                add("tldr-pages", "CC-BY-4.0", "call", "everyday-shell", "benign", "tldr|" + key, {"tool": "Bash", "command": ex, "page": f"{sub}/{name}"})
             break
 for name in PS:
     p = os.path.join(RAW, "tldr", "windows", name + ".md")
     if os.path.exists(p):
-        for ex in tldr_examples(p):
-            add("tldr-pages", "CC-BY-4.0", "call", "everyday-powershell", "benign", "tldr-ps|" + ex, {"tool": "PowerShell", "command": ex, "page": f"windows/{name}"}, "win32")
+        for key, ex in tldr_examples(p):
+            add("tldr-pages", "CC-BY-4.0", "call", "everyday-powershell", "benign", "tldr-ps|" + key, {"tool": "PowerShell", "command": ex, "page": f"windows/{name}"}, "win32")
 
 # ── Dedupe ids, split 70/30 by hash ────────────────────────────────────────────────────
 byid = {}

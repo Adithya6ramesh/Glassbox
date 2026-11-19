@@ -129,7 +129,9 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
 
     // Capability mismatch: a harmless-sounding purpose asking for powerful inputs.
     const purpose = [...nameWords(name), ...nameWords((desc ?? "").split(/[.\n]/)[0] ?? "").slice(0, 6)];
-    const harmless = purpose.some((w) => PURPOSE_HARMLESS.has(w)) && prof.acc.level !== "high-risk";
+    // Only short names state a single harmless purpose (get_time, add_numbers); in a longer name
+    // (add_pull_request_review_comment) the word is a verb about something else.
+    const harmless = nameWords(name).length <= 2 && purpose.some((w) => PURPOSE_HARMLESS.has(w)) && prof.acc.level !== "high-risk";
     const props = get(get(t, "inputSchema"), "properties");
     if (harmless && isRecord(props)) {
       for (const k of Object.keys(props)) {

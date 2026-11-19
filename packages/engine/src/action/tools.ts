@@ -128,7 +128,10 @@ export function profileMcpTool(name: string, descriptor: ToolDef | undefined): M
   const words = nameWords(name);
   const descWords = nameWords(firstSentence).slice(0, 3);
   const all = [...words, ...descWords];
-  const high = words.some((w) => HIGH_VERBS.has(w)) || (words.length > 0 && !words.some((w) => READ_VERBS.has(w) || WRITE_VERBS.has(w)) && descWords.some((w) => HIGH_VERBS.has(w)));
+  // Tool names are verb-first (get_release_by_tag): after a read or write verb, a "high" word is
+  // a noun. A high verb counts when it leads the name, or when the name has no read/write verb.
+  const plainVerb = words.some((w) => READ_VERBS.has(w) || WRITE_VERBS.has(w));
+  const high = HIGH_VERBS.has(words[0] ?? "") || (!plainVerb && words.some((w) => HIGH_VERBS.has(w))) || (words.length > 0 && !plainVerb && descWords.some((w) => HIGH_VERBS.has(w)));
   const write = all.some((w) => WRITE_VERBS.has(w));
   const read = words.some((w) => READ_VERBS.has(w)) || (!high && !write && descWords.some((w) => READ_VERBS.has(w)));
   if (high) { acc.raise("high-risk"); const tags = verbTags(all); for (const tg of tags) acc.tags.add(tg); if (tags.length === 0) acc.tags.add("exec.unknown"); }

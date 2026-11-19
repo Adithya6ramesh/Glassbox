@@ -70,6 +70,10 @@ Labels come from each source's own taxonomy and from the engine spec, never from
 
 ## Changes to the source text
 
+- tldr-pages: `{{[-u|--user]}}` marks a choice between option spellings; the first is used.
+  (Fixed after the first dev run. The first version kept `-u|--user`, which the shell reads as a
+  pipe. Only the 219 tldr command strings changed; ids, labels and the split stayed the same,
+  because ids hash the original line.)
 - Atomic Red Team: Slack webhook URLs are replaced by `hooks.slack.com/services/REDACTED`, because
   no credential-shaped literal may be committed to this repository. The network call stays visible.
 
