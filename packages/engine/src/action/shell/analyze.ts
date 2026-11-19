@@ -2,7 +2,7 @@
 import { Acc } from "../acc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
-  coversProtectedRead, isProtected, isProtectedRead, normalizePath, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
+  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
@@ -243,6 +243,8 @@ function destroy(acc: Acc, why: string): void {
 /** Checks for a path that is written, created, moved, deleted, chmod-ed or linked. */
 function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): void {
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
+  const persist = persistenceLabel(np, pctx);
+  if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   const home = pctx.homeDir.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
@@ -502,7 +504,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
   if (lower.startsWith("mkfs") || lower === "diskpart" || lower === "fdisk" || lower === "parted" || lower === "wipefs" || lower === "format") { destroy(acc, "formats or repartitions a disk"); return; }
   if (["chmod", "chown", "chgrp", "setfacl", "chattr", "icacls", "takeown", "attrib", "passwd", "usermod", "useradd", "visudo", "setcap"].includes(lower)) return perm(lower, args, c);
-  if (lower === "crontab") { acc.tag("high-risk", "config.agent"); acc.reason("changes scheduled jobs"); return; }
+  if (lower === "crontab") {
+    // Listing is a read; installing, editing or removing a crontab is persistence (CP-SELF-004).
+    const flags = args.map((a) => a.value ?? "");
+    if (flags.length === 1 && flags[0] === "-l") return;
+    acc.protect("CP-SELF-004", "changes scheduled jobs (crontab)");
+    return;
+  }
   if (lower === "rsync") return rsync(args, c);
   if (NET.has(lower)) return network(lower, args, c);
   if (["docker", "podman"].includes(lower)) return docker(args, c);

@@ -31,7 +31,7 @@ export class Acc {
     this.find("CP-SHELL-001", reason);
   }
 
-  protect(ruleId: "CP-SELF-001" | "CP-SELF-002" | "CP-SELF-003", reason: string): void {
+  protect(ruleId: "CP-SELF-001" | "CP-SELF-002" | "CP-SELF-003" | "CP-SELF-004", reason: string): void {
     this.selfProtection = true;
     this.raise("high-risk");
     this.tags.add("self-protection");

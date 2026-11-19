@@ -249,6 +249,43 @@ const HOME_FILES: [string, string][] = [
   [".pypirc", "registry-credentials"], [".git-credentials", "credentials"], [".config/gh/hosts.yml", "credentials"],
 ];
 
+// Persistence locations (spec rev 6, Q3): files that make code run later (login, boot, a
+// schedule, every shell or git command) or grant remote access. Writes are protected (CP-SELF-004).
+const PERSIST_HOME_FILES = [
+  ".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".profile", ".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout",
+  ".kshrc", ".cshrc", ".tcshrc", ".xprofile", ".xinitrc", ".xsessionrc", ".config/fish/config.fish", ".ssh/rc",
+  ".ssh/authorized_keys", ".ssh/authorized_keys2", ".ssh/config", ".gitconfig", ".config/git/config",
+];
+const PERSIST_HOME_DIRS = [
+  ".config/fish/conf.d", ".config/git/hooks", ".config/systemd/user", ".config/autostart", "library/launchagents",
+  "appdata/roaming/microsoft/windows/start menu/programs/startup", ".config/powershell",
+  "documents/windowspowershell", "documents/powershell",
+];
+const PERSIST_SYSTEM = [
+  "/etc/cron", "/var/spool/cron/", "/etc/systemd/system/", "/lib/systemd/system/", "/usr/lib/systemd/system/", "/library/launchagents/",
+  "/library/launchdaemons/", "/etc/profile", "/etc/bash.bashrc", "/etc/zshrc", "/etc/zsh/", "/etc/rc.local", "/etc/ld.so.preload",
+  "/etc/init.d/", "/etc/xdg/autostart/", "c:/programdata/microsoft/windows/start menu/programs/startup/",
+];
+
+/** A label when writing `np` would install persistence or change remote access, else null. */
+export function persistenceLabel(np: NormPath, ctx: PathCtx): string | null {
+  const lower = (np.path ?? np.suffix ?? "").toLowerCase().replace(/\/+$/, "");
+  if (lower === "") return null;
+  const home = (normalizeFull(ctx.homeDir, { ...ctx, cwd: "/" }) ?? "").toLowerCase();
+  if (np.path !== null) {
+    if (home) {
+      for (const f of PERSIST_HOME_FILES) if (lower === `${home}/${f}`) return f.includes("ssh/") ? "SSH access or startup file" : "shell, git or login startup file";
+      for (const d of PERSIST_HOME_DIRS) if (lower === `${home}/${d}` || lower.startsWith(`${home}/${d}/`)) return "autostart, scheduled or profile location";
+    }
+    for (const s of PERSIST_SYSTEM) if (lower.startsWith(s) || lower === s.replace(/\/$/, "")) return "system startup or scheduled-job location";
+    return null;
+  }
+  // Only the suffix is known (e.g. $SOMEDIR/.bashrc): match on the file name.
+  for (const f of PERSIST_HOME_FILES) if (lower.endsWith("/" + f)) return "shell, git or login startup file";
+  for (const d of PERSIST_HOME_DIRS) if (lower.includes("/" + d + "/") || lower.endsWith("/" + d)) return "autostart, scheduled or profile location";
+  return null;
+}
+
 /** Returns a label if `np` is a sensitive path, else null. */
 export function sensitiveLabel(np: NormPath, ctx: PathCtx): string | null {
   const p = np.path ?? np.suffix ?? "";

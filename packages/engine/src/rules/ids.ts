@@ -50,6 +50,7 @@ export const ENGINE_RULE_IDS: readonly string[] = [
  "CP-SELF-001",
  "CP-SELF-002",
  "CP-SELF-003",
+ "CP-SELF-004",
  "CP-EXFIL-030",
  "CP-EXFIL-031",
  "CP-EXFIL-040",
