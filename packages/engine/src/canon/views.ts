@@ -2,6 +2,7 @@
 // All transforms are per code point (after invisible/ANSI removal), so each view is
 // idempotent (P1) and every output position maps to an original position.
 import { CONFUSABLES } from "./confusables.generated.js";
+import { initTimed } from "../util/initclock.js";
 
 export interface View {
   text: string;
@@ -28,8 +29,18 @@ export interface Views {
   facts: Facts;
 }
 
-const CONF = new Map<number, string>();
-for (const k of Object.keys(CONFUSABLES)) CONF.set(parseInt(k, 36), CONFUSABLES[k] as string);
+// Built on first use of the skeleton view, not at module load, to keep start-up fast.
+let CONF: Map<number, string> | null = null;
+function confusable(cp: number): string | undefined {
+  if (CONF === null) {
+    CONF = initTimed(() => {
+      const m = new Map<number, string>();
+      for (const k of Object.keys(CONFUSABLES)) m.set(parseInt(k, 36), CONFUSABLES[k] as string);
+      return m;
+    });
+  }
+  return CONF.get(cp);
+}
 
 const RE_CF = /^\p{Cf}$/u;
 const RE_CC = /^\p{Cc}$/u;
@@ -136,7 +147,7 @@ function skeletonChar(s: string): string {
   for (let n = 0; n < 4; n++) {
     let mapped = "";
     for (const ch of cur) {
-      const t = CONF.get(ch.codePointAt(0) ?? 0);
+      const t = confusable(ch.codePointAt(0) ?? 0);
       mapped += t ?? ch;
     }
     let next = "";

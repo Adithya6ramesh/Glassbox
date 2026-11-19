@@ -23,10 +23,14 @@ export interface DecideInput {
 
 export interface DecideOutput { verdict: Verdict; verdictBeforeMode?: Verdict }
 
+/**
+ * R3 by mode (spec §6.2, rev 5). Irreversible-or-public tags ask in every mode, so in
+ * autopilot they become deny through R15 unless a tag override or a remembered rule lifts
+ * the ask first. Other high-risk tags: strict asks, balanced and autopilot warn.
+ */
 function modeVerdict(tag: ActionTag | null, mode: ApprovalMode, irreversible: ReadonlySet<ActionTag>): Verdict {
-  if (mode === "strict") return "ask";
-  if (mode === "autopilot") return "warn";
-  return tag !== null && irreversible.has(tag) ? "ask" : "warn";
+  if (tag !== null && irreversible.has(tag)) return "ask";
+  return mode === "strict" ? "ask" : "warn";
 }
 
 export function decide(d: DecideInput): DecideOutput {

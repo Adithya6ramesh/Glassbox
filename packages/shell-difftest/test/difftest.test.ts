@@ -1,7 +1,7 @@
 // T-DIFF (spec §13): the engine's shell parser vs. real bash.
 // A case fails when the parser says "analyzable" but bash executed a command the parser
 // didn't list (or bash rejected the syntax). "Unanalyzable" never fails: it's the safe answer.
-// Runs on Linux/macOS (/bin/bash) or wherever GLASSBOX_BASH points (e.g. Git Bash on Windows).
+// Runs only where src/guard.ts allows: Linux CI or the Docker sandbox. Never on a dev machine.
 import { describe, expect, it } from "vitest";
 import { shellArgvView } from "../../engine/src/action/shell/view.js";
 import { buildCorpus } from "../src/corpus.js";

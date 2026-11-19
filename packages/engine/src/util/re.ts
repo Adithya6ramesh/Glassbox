@@ -1,6 +1,7 @@
 // Linear-time regex (engine-spec §10.3): every pattern applied to untrusted text goes
 // through re2js. Compiled patterns are cached per pattern string (bounded cache).
 import { RE2JS } from "re2js";
+import { initTimed } from "./initclock.js";
 
 type Compiled = ReturnType<typeof RE2JS.compile>;
 const cache = new Map<string, Compiled | null>();
@@ -10,7 +11,7 @@ export function compile(pattern: string, flags?: "i"): Compiled | null {
   if (cache.has(key)) return cache.get(key) ?? null;
   let c: Compiled | null;
   try {
-    c = RE2JS.compile(flags === "i" ? `(?i)${pattern}` : pattern);
+    c = initTimed(() => RE2JS.compile(flags === "i" ? `(?i)${pattern}` : pattern));
   } catch {
     c = null;
   }

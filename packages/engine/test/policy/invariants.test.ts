@@ -113,6 +113,27 @@ describe("mode table (§6.2)", () => {
     expect(read("autopilot")).toBe("warn");
   });
 
+  it("rev 5: irreversible or public actions ask in every mode (deny in autopilot)", () => {
+    const cmds = ["git push --force", "git reset --hard", "npm publish", "vercel --prod", "terraform apply", "chmod -R 777 .", "claude -p hi", "gh pr create -t x -b y"];
+    for (const cmd of cmds) {
+      expect(MODES.map((mode) => bash(cmd, ctx({ policy: { mode } })).verdict), cmd).toEqual(["ask", "ask", "deny"]);
+      expect(bash(cmd, ctx({ policy: { mode: "autopilot" } })).verdictBeforeMode, cmd).toBe("ask");
+    }
+    // Reversible high-risk actions keep the old behaviour: warn in balanced and autopilot.
+    for (const cmd of ["rm build.log", "curl https://example.com", "git push origin main"]) {
+      expect(MODES.map((mode) => bash(cmd, ctx({ policy: { mode } })).verdict), cmd).toEqual(["ask", "warn", "warn"]);
+    }
+  });
+
+  it("rev 5: a tag override or a remembered rule still lifts the mode-driven ask in autopilot", () => {
+    const override = ctx({ policy: { mode: "autopilot", tagOverrides: { "publish.public": "allow" } } });
+    expect(bash("npm publish", override).verdict).toBe("warn"); // net.egress still warns
+    const remembered = ctx({ policy: { mode: "autopilot" }, remembered: [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: "publish.public", createdAt: "2026-01-01T00:00:00Z" }] });
+    expect(bash("npm publish", remembered).verdict).toBe("allow");
+    // Neither lifts a floor.
+    expect(bash("rm -rf /", remembered).verdict).toBe("deny");
+  });
+
   it("Decision records the mode", () => {
     for (const mode of MODES) expect(bash("ls", ctx({ policy: { mode } })).mode).toBe(mode);
   });

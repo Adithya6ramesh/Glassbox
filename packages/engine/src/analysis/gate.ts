@@ -15,6 +15,7 @@ import { sha256Hex } from "../util/hash.js";
 import { jcs } from "../util/jcs.js";
 import { get, getString, isRecord, utf8Length } from "../util/misc.js";
 import { ENGINE_VERSION } from "../version.js";
+import { initMs } from "../util/initclock.js";
 import { genericFields, type Field } from "./fields.js";
 import { dedupe, FindingFactory, sevRank, sortFindings } from "./findings.js";
 import { tokenize } from "./match.js";
@@ -189,6 +190,7 @@ function callFields(call: { serverId: string; toolName: string; arguments: unkno
 }
 
 export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: number): Decision {
+  const init0 = initMs();
   const c = validateCtx(ctxIn);
   if (!c) return errorDecision(t0, undefined);
   const ff = new FindingFactory(c.ruleset, c.evidenceMode);
@@ -260,7 +262,8 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   if (ink.degraded) degradedReasons.push(...new Set(ink.issues.map((i) => i.code)));
   if (scan.windowed) degradedReasons.push("CP-LIMIT-006");
   if (scan.decodeExhausted) { degradedReasons.push("CP-LIMIT-007"); findings.push(ff.make({ ruleId: "CP-LIMIT-007", location: "" })); }
-  if (now() - t0 > c.limits.hardStopMs) { degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
+  // One-time initialization (regex compiles, tables) doesn't count against the backstop.
+  if (now() - t0 - (initMs() - init0) > c.limits.hardStopMs) { degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
 
   let fs = dedupe(findings);
   const sup = suppress(fs, c, ff);

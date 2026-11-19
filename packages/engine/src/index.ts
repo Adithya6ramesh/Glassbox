@@ -9,12 +9,11 @@ import { renderForModel as render } from "./evidence/evidence.js";
 import { fingerprintOf } from "./fingerprint/fingerprint.js";
 import { diffImpl } from "./fingerprint/diff.js";
 import { EMBEDDED_BASELINE as BASELINE } from "./ruleset/baseline.js";
-import { loadRuleset as load } from "./ruleset/load.js";
 import { redact as redactImpl } from "./secrets/redact.js";
 import { scoreFindings } from "./grade/score.js";
 import type {
   ActionContext, ActionRisk, AnalyzeOptions, Decision, DiffOptions, Finding, Fingerprint, FingerprintResult, LoadedRuleset,
-  LoadRulesetOptions, ManifestDiff, RedactOptions, Redacted, ServerReport, SessionContext, ToolDef,
+  ManifestDiff, RedactOptions, Redacted, ServerReport, SessionContext, ToolDef,
 } from "./types.js";
 import { get, getString, isRecord } from "./util/misc.js";
 import { ENGINE_VERSION as VERSION } from "./version.js";
@@ -132,10 +131,6 @@ export function renderForModel(findings: readonly Finding[]): string {
   return render(findings);
 }
 
-export function loadRuleset(envelope: Uint8Array | string, opts: LoadRulesetOptions): LoadedRuleset {
-  return load(envelope, opts);
-}
-
 /** Splits Claude Code tool names: mcp__<server>__<tool> and mcp__plugin_<plugin>_<server>__<tool>. */
 export function parseClaudeCodeToolName(name: string): { serverId: string; toolName: string; plugin?: string } {
   try {
@@ -155,24 +150,3 @@ export function parseClaudeCodeToolName(name: string): { serverId: string; toolN
     return { serverId: "builtin", toolName: "" };
   }
 }
-
-/**
- * Warm the engine's pure memo caches (compiled linear regexes, canonical phrase tokens)
- * once at load, so per-call timing and the hardStopMs backstop measure only the call's
- * own work. The caches never change results (I8); start-up cost is measured in the bench.
- */
-function warm(): void {
-  try {
-    const ctx: SessionContext = {
-      sessionId: "warm", platform: "linux", homeDir: "/home/warm", cwd: "/home/warm/p", caseInsensitiveFs: false,
-      glassboxDirs: ["/home/warm/.glassbox"], servers: [], policy: { mode: "balanced" }, ruleset: BASELINE,
-    };
-    checkToolCallImpl({ serverId: "builtin", toolName: "Bash", arguments: { command: "git status && echo \"$(date)\" > out.txt # token=abc" } }, ctx, t());
-    checkToolCallImpl({ serverId: "builtin", toolName: "PowerShell", arguments: { command: "Get-ChildItem | Select-Object -First 1" } }, { ...ctx, platform: "win32" }, t());
-    checkToolResultImpl({ call: { serverId: "warm", toolName: "fetch", arguments: {} }, result: { content: [{ type: "text", text: "warm-up text" }] } }, ctx, t());
-    analyzeServerImpl({ tools: [{ name: "warm_tool", description: "Warm up.", inputSchema: { type: "object" } }] }, undefined, t());
-  } catch {
-    // Warming is best-effort; correctness never depends on it.
-  }
-}
-warm();

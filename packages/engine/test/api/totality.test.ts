@@ -2,6 +2,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import * as engine from "../../src/index.js";
+import { loadRuleset } from "../../src/ruleset-entry.js";
 import { ctx, FAKE } from "../helpers.js";
 
 const hostileValues = (): unknown[] => {
@@ -34,7 +35,7 @@ const API: Array<[string, (x: unknown) => unknown]> = [
   ["classifyAction", (x) => engine.classifyAction(x)],
   ["redact", (x) => engine.redact(x)],
   ["renderForModel", (x) => engine.renderForModel(x as never)],
-  ["loadRuleset", (x) => engine.loadRuleset(x as never, { minSequence: 0, now: "2026-11-18T00:00:00Z" })],
+  ["loadRuleset", (x) => loadRuleset(x as never, { minSequence: 0, now: "2026-11-18T00:00:00Z" })],
   ["parseClaudeCodeToolName", (x) => engine.parseClaudeCodeToolName(x as never)],
   ["diffFingerprints", (x) => engine.diffFingerprints(x as never, x as never)],
   ["checkToolCall(bad ctx)", (x) => engine.checkToolCall({ serverId: "builtin", toolName: "Bash", arguments: { command: "ls" } }, x as never)],

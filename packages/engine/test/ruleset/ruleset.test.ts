@@ -2,8 +2,8 @@
 // I12 wording, layering rules.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";
-import { EMBEDDED_BASELINE, checkToolCall, loadRuleset, type LoadedRuleset } from "../../src/index.js";
-import { runRuleSelfTests } from "../../src/ruleset/selftest.js";
+import { EMBEDDED_BASELINE, checkToolCall, type LoadedRuleset } from "../../src/index.js";
+import { BASELINE_TEST_CASES, loadRuleset, runRuleSelfTests } from "../../src/ruleset-entry.js";
 import { jcs } from "../../src/util/jcs.js";
 import { acrossModes, bash, builtin, ctx } from "../helpers.js";
 
@@ -148,12 +148,29 @@ describe("embedded baseline", () => {
   });
 
   it("I6: every declarative rule's own positive and negative cases pass (≥ 3 each)", () => {
-    const report = runRuleSelfTests(EMBEDDED_BASELINE);
+    // The embedded baseline ships its cases in a separate module (start-up budget).
+    const report = runRuleSelfTests(EMBEDDED_BASELINE, BASELINE_TEST_CASES);
     expect(report.failures).toEqual([]);
     for (const r of EMBEDDED_BASELINE.rules) {
       if (r.matcher.type === "structural") continue;
-      expect(r.testCases.positive.length, r.id).toBeGreaterThanOrEqual(3);
-      expect(r.testCases.negative.length, r.id).toBeGreaterThanOrEqual(3);
+      expect(BASELINE_TEST_CASES[r.id]?.positive.length ?? 0, r.id).toBeGreaterThanOrEqual(3);
+      expect(BASELINE_TEST_CASES[r.id]?.negative.length ?? 0, r.id).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it("the generated baseline files are in sync with rules/*.json", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { fileURLToPath } = await import("node:url");
+    const script = fileURLToPath(new URL("../../../rules-baseline/scripts/build.mjs", import.meta.url));
+    expect(() => execFileSync(process.execPath, [script, "--check"], { stdio: "pipe" })).not.toThrow();
+  });
+
+  it("no credential-shaped literal is committed in the rules (placeholders only)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { detectSecrets } = await import("../../src/secrets/detect.js");
+    for (const f of ["../../src/ruleset/baseline.generated.ts", "../../src/ruleset/baseline-tests.generated.ts", "../../../rules-baseline/rules/declarative.json"]) {
+      const text = readFileSync(new URL(f, import.meta.url), "utf8");
+      expect(detectSecrets(text).filter((s) => !s.example && s.type !== "generic-high-entropy").map((s) => s.type), f).toEqual([]);
     }
   });
 

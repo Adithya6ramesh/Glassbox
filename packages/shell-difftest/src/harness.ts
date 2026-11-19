@@ -5,9 +5,10 @@
 // - echo, printf, true, false, test, [, pwd, kill and read are replaced by logging functions;
 // - HOME and the working directory are a fresh sandbox directory.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tdiffAllowed, type GuardProbe } from "./guard.js";
 
 const PREAMBLE = String.raw`
 exec 9>>"$GBX_LOG"
@@ -33,11 +34,24 @@ export interface BashRun {
   timedOut: boolean;
 }
 
+/** The real process probe for the T-DIFF guard. */
+export function realProbe(): GuardProbe {
+  return {
+    platform: process.platform,
+    env: process.env,
+    exists: (p) => existsSync(p),
+    readFile: (p) => { try { return readFileSync(p, "utf8"); } catch { return null; } },
+    listDir: (p) => { try { return readdirSync(p); } catch { return null; } },
+  };
+}
+
+/**
+ * The bash to compare against, or undefined when T-DIFF must not run here (see guard.ts).
+ * There's deliberately no override: T-DIFF never runs on a developer's machine.
+ */
 export function findBash(): string | undefined {
-  const fromEnv = process.env["GLASSBOX_BASH"];
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
-  if (process.platform === "linux" || process.platform === "darwin") return "/bin/bash";
-  return undefined;
+  if (!tdiffAllowed(realProbe()).allowed) return undefined;
+  return existsSync("/bin/bash") ? "/bin/bash" : undefined;
 }
 
 /**
@@ -89,6 +103,9 @@ function parseLog(buf: Buffer): string[][] {
 const isolated = new Set<string>();
 
 export function runInBash(bash: string, command: string, timeoutMs = 4000): Promise<BashRun> {
+  // Never run outside Linux CI or the Docker sandbox, even if called directly (guard.ts).
+  const where = tdiffAllowed(realProbe());
+  if (!where.allowed) return Promise.reject(new Error(`T-DIFF refuses to run: ${where.reason}`));
   // Never run anything unless this bash is proven unable to reach real programs (RT-T1).
   if (!isolated.has(bash)) { assertIsolated(bash); isolated.add(bash); }
   if (!safeToExecute(command)) return Promise.reject(new Error("refusing to execute a command that names a program by path"));

@@ -9,9 +9,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./ruleset": {
+      "types": "./dist/ruleset-entry.d.ts",
+      "import": "./dist/ruleset-entry.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=24.11.0"
   },
