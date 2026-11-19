@@ -1,4 +1,4 @@
-// @glassbox/engine public API (engine-spec §4). Every function is synchronous, pure and
+// @glassbox-ai/engine public API (engine-spec §4). Every function is synchronous, pure and
 // total: none of them throws, and a failure never becomes a silent allow.
 import { classifyBuiltin, classifyMcp } from "./action/tools.js";
 import { pathCtxFrom } from "./action/paths.js";

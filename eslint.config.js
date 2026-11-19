@@ -20,15 +20,15 @@ const engineRestrictions = {
   "no-new-func": "error",
   "no-restricted-imports": ["error", {
     paths: BANNED_MODULES.flatMap((m) => [
-      { name: m, message: "Banned in @glassbox/engine (engine-spec §2): no I/O or host APIs." },
-      { name: `node:${m}`, message: "Banned in @glassbox/engine (engine-spec §2): no I/O or host APIs." },
+      { name: m, message: "Banned in @glassbox-ai/engine (engine-spec §2): no I/O or host APIs." },
+      { name: `node:${m}`, message: "Banned in @glassbox-ai/engine (engine-spec §2): no I/O or host APIs." },
     ]),
   }],
   "no-restricted-globals": ["error",
     ...["process", "require", "Buffer", "fetch", "XMLHttpRequest", "WebSocket",
         "setTimeout", "setInterval", "setImmediate", "queueMicrotask",
         "globalThis", "global", "window", "self"].map((name) => ({
-      name, message: "Host globals are banned in @glassbox/engine (engine-spec §1, §2).",
+      name, message: "Host globals are banned in @glassbox-ai/engine (engine-spec §1, §2).",
     })),
   ],
   "no-restricted-syntax": ["error",

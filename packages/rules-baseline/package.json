@@ -1,5 +1,5 @@
 {
-  "name": "@glassbox/rules-baseline",
+  "name": "@glassbox-ai/rules-baseline",
   "version": "0.0.0",
   "private": true,
   "description": "Public Glassbox baseline ruleset (JSON data) and its signing script.",

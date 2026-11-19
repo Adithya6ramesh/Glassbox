@@ -210,7 +210,7 @@ importers:
 
   packages/shell-difftest:
     dependencies:
-      '@glassbox/engine':
+      '@glassbox-ai/engine':
         specifier: workspace:*
         version: link:../engine
 

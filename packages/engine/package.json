@@ -1,5 +1,5 @@
 {
-  "name": "@glassbox/engine",
+  "name": "@glassbox-ai/engine",
   "version": "0.1.0",
   "description": "Glassbox security engine: pure, deterministic analysis of MCP metadata and agent tool calls.",
   "keywords": [
@@ -44,7 +44,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "tsc -b"
   },
   "dependencies": {
     "@noble/curves": "2.4.0",

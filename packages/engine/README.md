@@ -1,4 +1,4 @@
-# @glassbox/engine
+# @glassbox-ai/engine
 
 Checks what an AI agent is about to do and what it reads. For each step it answers allow,
 warn, ask or deny. It also grades MCP servers from their metadata. It's a library with no I/O;
@@ -7,11 +7,11 @@ it is deterministic and never throws.
 **Status: early, v0.1.** The API and the rules will change.
 
 ```sh
-npm install @glassbox/engine
+npm install @glassbox-ai/engine
 ```
 
 ```js
-import { EMBEDDED_BASELINE, checkToolCall } from "@glassbox/engine";
+import { EMBEDDED_BASELINE, checkToolCall } from "@glassbox-ai/engine";
 
 const decision = checkToolCall(
   { serverId: "builtin", toolName: "Bash", arguments: { command: "rm -rf ~/Documents" } },

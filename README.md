@@ -3,7 +3,7 @@
 Glassbox checks what an AI agent is about to do and what it reads. For each step it answers
 allow, warn, ask or deny. It also grades MCP servers from their metadata.
 
-**Status: early, v0.1.** This repository holds the engine, `@glassbox/engine`: a library with
+**Status: early, v0.1.** This repository holds the engine, `@glassbox-ai/engine`: a library with
 no I/O. It doesn't hook into an agent by itself yet. An integration for Claude Code comes
 next. Expect the API and the rules to change.
 
@@ -22,7 +22,7 @@ never a silent allow. Rules ship as a signed ruleset, and the embedded baseline 
 ## Install
 
 ```sh
-npm install @glassbox/engine
+npm install @glassbox-ai/engine
 ```
 
 Requires Node 24.11 or later. Four runtime dependencies: `re2js` (linear-time regex),
@@ -31,7 +31,7 @@ Requires Node 24.11 or later. Four runtime dependencies: `re2js` (linear-time re
 ## Use
 
 ```js
-import { EMBEDDED_BASELINE, analyzeServer, checkToolCall, checkToolResult, renderForModel } from "@glassbox/engine";
+import { EMBEDDED_BASELINE, analyzeServer, checkToolCall, checkToolResult, renderForModel } from "@glassbox-ai/engine";
 
 const ctx = {
   sessionId: "session-1",
