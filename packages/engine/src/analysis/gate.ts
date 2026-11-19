@@ -76,6 +76,13 @@ function validateCtx(c: unknown): Ctx | null {
   };
 }
 
+/** Why protection is degraded: the ruleset's own cause, else the reason carried by the session signal. */
+function degradedReason(c: Ctx): "tampered" | "downgrade" | "internal-error" {
+  if (c.ruleset.degradedCause) return c.ruleset.degradedCause;
+  const s = c.signals.find((x) => x.kind === "protection-degraded");
+  return s?.kind === "protection-degraded" ? s.reason : "tampered";
+}
+
 function toolCtx(c: Ctx): ToolCtx {
   const r = c.raw;
   return {
@@ -175,8 +182,11 @@ export function errorDecision(t0: number, mode: SessionContext["policy"]["mode"]
     engineVersion: ENGINE_VERSION,
     degraded: true,
     degradedReasons: ["internal-error"],
-    protectionDegraded: false,
-    signals: [],
+    // Q4 (rev 6): the verdict stays as is (warn for a result), but the session is marked
+    // protection-degraded, so R16 makes the next high-risk call ask (deny in autopilot).
+    // This signal never expires; atCall is unknown here and doesn't matter.
+    protectionDegraded: true,
+    signals: [{ kind: "protection-degraded", reason: "internal-error", atCall: 0 }],
     suppressed: [],
     mode: mode === "strict" || mode === "autopilot" ? mode : "balanced",
     inputDigest: sha256Hex(""),
@@ -187,6 +197,18 @@ export function errorDecision(t0: number, mode: SessionContext["policy"]["mode"]
 // ── checkToolCall ────────────────────────────────────────────────────────
 
 const EGRESS_TAGS: ActionTag[] = ["net.egress", "publish.public", "message.send"];
+
+/**
+ * Q2 (rev 6): secrets precise enough to ask about when they go to a non-read tool
+ * (CP-EXFIL-032). Test-mode keys, example values, JWTs and generic high-entropy strings
+ * stay at their usual (warn) level.
+ */
+const LIVE_SECRET_TYPES = new Set([
+  "private-key", "db-connection-string", "stripe-key", "github-token", "gitlab-token", "slack-token", "slack-webhook",
+  "aws-access-key-id", "aws-secret-access-key", "gcp-api-key", "anthropic-key", "openai-key", "azure-storage-key", "azure-conn-string",
+]);
+const isLiveSecret = (s: { type: string; value: string; example: boolean }): boolean =>
+  !s.example && LIVE_SECRET_TYPES.has(s.type) && !(s.type === "stripe-key" && (s.value.startsWith("sk_test_") || s.value.startsWith("rk_test_")));
 const ISSUERS: Record<string, string> = {
   "github-token": "github", "gitlab-token": "gitlab", "slack-token": "slack", "slack-webhook": "slack", "stripe-key": "stripe", "aws-access-key-id": "aws",
   "aws-secret-access-key": "aws", "gcp-api-key": "google", "openai-key": "openai", "anthropic-key": "anthropic", "azure-storage-key": "azure", "azure-conn-string": "azure",
@@ -242,7 +264,14 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   // Layer 2: correlation with secrets, destinations and session signals.
   const secretFindings = scan.findings.filter((f) => f.ruleId === "CP-SECRET-002" && f.confidence >= 0.5);
   const secretTypes = new Set<string>();
-  for (const f of callFields(call)) for (const s of detectSecrets(f.text, f.keyName)) if (!s.example) secretTypes.add(s.type);
+  let liveSecret = false;
+  for (const f of callFields(call)) {
+    for (const s of detectSecrets(f.text, f.keyName)) {
+      if (!s.example) secretTypes.add(s.type);
+      if (isLiveSecret(s)) liveSecret = true;
+    }
+  }
+  if (liveSecret && risk.level !== "read") findings.push(ff.make({ ruleId: "CP-EXFIL-032", location: secretFindings[0]?.location ?? "/arguments" }));
   const egress = risk.tags.some((t) => EGRESS_TAGS.includes(t));
   if (secretTypes.size > 0 && egress) findings.push(ff.make({ ruleId: "CP-EXFIL-031", location: secretFindings[0]?.location ?? "/arguments" }));
   const server = c.raw.servers?.find((s) => s.serverId === serverId);
@@ -292,7 +321,7 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   for (const t of secretTypes) signals.push({ kind: "secret-seen", secretType: t, atCall: at });
   const ext = risk.tags.filter((t) => EGRESS_TAGS.includes(t));
   if (ext.length > 0) signals.push({ kind: "external-write", serverId, toolName, tags: ext, atCall: at });
-  if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: c.ruleset.degradedCause ?? (sig.find((s) => s.kind === "protection-degraded") as { reason: "tampered" | "downgrade" } | undefined)?.reason ?? "tampered", atCall: at });
+  if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: degradedReason(c), atCall: at });
 
   const out = decide({
     kind: "call", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
@@ -398,7 +427,7 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
   for (const t of secretTypes) signals.push({ kind: "secret-seen", secretType: t, atCall: at });
   const untrusted = serverId !== "builtin" || UNTRUSTED_BUILTINS.has(toolName) || risk.tags.includes("net.egress") || degraded || injected;
   if (untrusted) signals.push({ kind: "untrusted-content-seen", serverId, toolName, atCall: at });
-  if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: c.ruleset.degradedCause ?? "tampered", atCall: at });
+  if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: degradedReason(c), atCall: at });
 
   const out = decide({
     kind: "result", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
@@ -498,7 +527,7 @@ export function checkServerRequestImpl(input: unknown, ctxIn: SessionContext, t0
     degraded,
     degradedReasons: degraded ? [...new Set(ink.issues.map((i) => i.code))] : [],
     protectionDegraded: c.protectionDegraded,
-    signals: c.protectionDegraded ? [{ kind: "protection-degraded", reason: c.ruleset.degradedCause ?? "tampered", atCall: c.callIndex }] : [],
+    signals: c.protectionDegraded ? [{ kind: "protection-degraded", reason: degradedReason(c), atCall: c.callIndex }] : [],
     suppressed: sup.suppressed,
     mode: c.mode,
     ...(out.verdictBeforeMode !== undefined ? { verdictBeforeMode: out.verdictBeforeMode } : {}),
