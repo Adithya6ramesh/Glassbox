@@ -10,9 +10,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tdiffAllowed, type GuardProbe } from "./guard.js";
 
+// Built by concatenation: inside a template literal, bash's ${...} would be interpolated.
+// Escapes \x01 as \x01\x01 and newline as \x01n so a record never contains a newline (see decodeArg).
+const LOGGER = "__gbx_log() { local a; local -a o=(\"$#\"); for a in \"$@\"; do " +
+  "a=\"$" + "{a//$'\\x01'/$'\\x01\\x01'}\"; o+=(\"$" + "{a//$'\\n'/$'\\x01'n}\"); done; " +
+  "builtin printf '%s\\0' \"$" + "{o[@]}\" >&9; }";
+
 const PREAMBLE = String.raw`
 exec 9>>"$GBX_LOG"
-__gbx_log() { local a; local -a o=("$#"); for a in "$@"; do a="${a//$'\x01'/$'\x01\x01'}"; o+=("${a//$'\n'/$'\x01'n}"); done; builtin printf '%s\0' "${o[@]}" >&9; }
+${LOGGER}
 command_not_found_handle() { __gbx_log "$@"; return 0; }
 echo() { __gbx_log echo "$@"; }
 printf() { __gbx_log printf "$@"; }
