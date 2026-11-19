@@ -1,6 +1,7 @@
 // Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
 import { Acc } from "../acc.js";
 import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
+import { commandFiles, schtasksJob } from "../schedule.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
@@ -255,7 +256,8 @@ function destroy(acc: Acc, why: string): void {
 /** Checks for a path that is written, created, moved, deleted, chmod-ed or linked. */
 function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): void {
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-  acc.persist(persistenceHit(np, pctx), "changes");
+  acc.persist(persistenceHit(np, pctx), "changes", np.path);
+  acc.wrote(np.path);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
@@ -557,10 +559,15 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if (lower.startsWith("mkfs") || lower === "diskpart" || lower === "fdisk" || lower === "parted" || lower === "wipefs" || lower === "format") { destroy(acc, "formats or repartitions a disk"); return; }
   if (["chmod", "chown", "chgrp", "setfacl", "chattr", "icacls", "takeown", "attrib", "passwd", "usermod", "useradd", "visudo", "setcap"].includes(lower)) return perm(lower, args, c);
   if (lower === "crontab") {
-    // Listing is a read; installing, editing or removing a crontab is persistence (CP-SELF-004).
+    // Listing is a read; installing, editing or removing a crontab is a scheduled job (CP-SELF-006).
     const flags = args.map((a) => a.value ?? "");
-    if (flags.length === 1 && flags[0] === "-l") return;
-    acc.protect("CP-SELF-004", "changes scheduled jobs (crontab)");
+    if (flags.every((f) => f === "-l" || f === "-u" || !f.startsWith("-")) && flags.includes("-l")) return;
+    if (flags.includes("-r")) { acc.scheduleJob({ kind: "cron", verb: "removes", path: null, schedule: "every job in this crontab", files: [] }); return; }
+    const file = operands(args, new Set(["-u"]))[0];
+    const fileVal = file && file.value !== "-" ? file.pathValue : null;
+    const np = fileVal ? normalizePath(fileVal, pctx) : null;
+    // The schedule comes from the crontab text when it's in the command (echo … | crontab -).
+    acc.scheduleJob({ kind: "cron", verb: flags.includes("-e") ? "changes" : "creates", path: null, schedule: null, files: np?.path ? [np.path] : [] });
     return;
   }
   if (lower === "rsync") return rsync(args, c);
@@ -590,6 +597,8 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
   if (WRITE.has(lower)) return writeOps(operands(args, new Set(["-t", "--target-directory", "-m", "--mode", "-S", "--suffix", "-o", "-g", "-p"])), c, "fs.write");
   if (READ.has(lower)) return;
+  // Scheduled jobs and services (rev 9): ask with the schedule and the command (CP-SELF-006).
+  if (scheduledJobCommand(lower, args, c)) return;
   if (["kill", "pkill", "killall", "systemctl", "service", "launchctl", "shutdown", "reboot", "halt", "poweroff", "init", "telinit"].includes(lower)) {
     const vals = args.map((a) => (a.value ?? "").toLowerCase());
     const power = ["shutdown", "reboot", "halt", "poweroff"].includes(lower) || ((lower === "init" || lower === "telinit") && ["0", "6"].includes(vals[0] ?? ""));
@@ -598,14 +607,6 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
     if (power || sysctlPower) { acc.tag("high-risk", "infra.change"); acc.reason("powers off or restarts the machine"); }
     else if (stopsService) { acc.tag("high-risk", "infra.change"); acc.reason("stops or disables a system service"); }
     else acc.tag("write-reversible", "exec.unknown");
-    return;
-  }
-  // Scheduled and timed jobs are persistence (CP-SELF-004), like crontab.
-  if ((lower === "systemd-run" && args.some((a) => /^--on-(calendar|active|boot|startup|unit-active|unit-inactive)/.test(a.value ?? ""))) ||
-      ((lower === "at" || lower === "batch") && args.length > 0 && !args.every((a) => ["-l", "-V"].includes(a.value ?? ""))) ||
-      (lower === "schtasks" && args.some((a) => /^[/-]create$/i.test(a.value ?? ""))) ||
-      (lower === "sc" && (args[0]?.value ?? "").toLowerCase() === "create")) {
-    acc.protect("CP-SELF-004", "schedules a job or installs a service that runs later");
     return;
   }
   // Deleting backups, shadow copies or recovery settings: irreversible (ask).
@@ -879,6 +880,77 @@ function find(args: WordInfo[], c: Ctx2, unwrapDepth: number): void {
     if (v === "-fprint" || v === "-fprintf" || v === "-fls") acc.tag("write-reversible", "fs.write");
   }
   // find loops forever on `while j < … && args[j] !== ";"` only if inner never ends; bounded by args length.
+}
+
+/** systemd-run timers, at, schtasks, sc, launchctl and systemctl enable. True when handled. */
+function scheduledJobCommand(lower: string, args: WordInfo[], c: Ctx2): boolean {
+  const { acc, pctx } = c;
+  const vals = args.map((a) => a.value ?? "");
+  const lv = vals.map((v) => v.toLowerCase());
+  const abs = (f: string) => normalizePath(f, pctx).path ?? f;
+  if (lower === "systemd-run") {
+    const sched: string[] = [];
+    const withValue = new Set(["--unit", "-u", "--property", "-p", "--description", "--slice", "--setenv", "-E", "--uid", "--gid", "--working-directory", "-M", "--machine", "--nice", "--timer-property"]);
+    let i = 0;
+    for (; i < vals.length; i++) {
+      const v = vals[i] as string;
+      if (v.startsWith("--on-")) { const eq = v.indexOf("="); if (eq > 0) sched.push(v); else { sched.push(`${v} ${vals[i + 1] ?? ""}`.trim()); i++; } continue; }
+      if (withValue.has(v)) { i++; continue; }
+      if (v.startsWith("-")) continue;
+      break;
+    }
+    if (sched.length === 0) return false; // a transient unit that runs now, not later
+    acc.scheduleJob({ kind: "systemd", verb: "creates", path: null, schedule: sched.join(", "), files: commandFiles(vals.slice(i).join(" ")).map(abs) });
+    return true;
+  }
+  if (lower === "at" || lower === "batch") {
+    if (vals.length === 0 && lower === "at") return false;
+    if (vals.every((v) => v === "-l" || v === "-V")) return true; // listing
+    if (vals.includes("-r") || vals.includes("-d")) { acc.scheduleJob({ kind: "at", verb: "removes", path: null, schedule: `job ${vals.filter((v) => !v.startsWith("-")).join(" ")}`, files: [] }); return true; }
+    const fIdx = vals.indexOf("-f");
+    const file = fIdx >= 0 ? vals[fIdx + 1] : undefined;
+    const spec = vals.filter((v, k) => !v.startsWith("-") && !(fIdx >= 0 && k === fIdx + 1)).join(" ");
+    acc.scheduleJob({ kind: "at", verb: "creates", path: null, schedule: lower === "batch" ? "when the system load allows" : spec || null, files: file ? [abs(file)] : [] });
+    return true;
+  }
+  if (lower === "schtasks" || lower === "schtasks.exe") {
+    const op = lv.find((v) => ["/create", "-create", "/delete", "-delete", "/change", "-change", "/run", "-run"].includes(v));
+    if (op === undefined) return true; // /query and the rest: listing
+    if (op.endsWith("delete")) { acc.scheduleJob({ kind: "task-scheduler", verb: "removes", path: null, schedule: `task ${vals[lv.indexOf("/tn") + 1] ?? ""}`.trim(), files: [] }); return true; }
+    if (op.endsWith("run")) { acc.tag("high-risk", "exec.unknown"); acc.reason("runs a scheduled task now"); return true; }
+    const j = schtasksJob(lv.map((v, k) => (v.startsWith("/") || v.startsWith("-") ? "/" + v.slice(1) : vals[k] as string)));
+    acc.scheduleJob({ kind: "task-scheduler", verb: op.endsWith("create") ? "creates" : "changes", path: null, schedule: j.schedule, files: j.files });
+    return true;
+  }
+  if (lower === "sc" || lower === "sc.exe") {
+    const sub = lv[0] ?? "";
+    if (!["create", "config", "delete"].includes(sub)) return false;
+    const after = (key: string) => { const k = lv.findIndex((v) => v === key || v.startsWith(key)); if (k < 0) return null; const v = vals[k] as string; return v.length > key.length ? v.slice(key.length) : vals[k + 1] ?? null; };
+    const bin = after("binpath=");
+    const start = after("start=");
+    acc.scheduleJob({ kind: "service", verb: sub === "delete" ? "removes" : sub === "create" ? "creates" : "changes", path: null, schedule: start ? `start=${start}` : sub === "delete" ? `service ${vals[1] ?? ""}` : "as a Windows service", files: bin ? commandFiles(bin) : [] });
+    return true;
+  }
+  if (lower === "launchctl") {
+    const sub = lv[0] ?? "";
+    const plist = operands(args).slice(1).map((o) => o.pathValue).filter((p): p is string => p !== null).pop();
+    if (["load", "bootstrap", "enable", "submit"].includes(sub)) {
+      acc.scheduleJob({ kind: "launchd", verb: "creates", path: plist ? abs(plist) : null, schedule: "as the plist says (loaded now)", files: plist ? [abs(plist)] : [] });
+      return true;
+    }
+    if (["unload", "bootout", "remove", "disable"].includes(sub)) { acc.scheduleJob({ kind: "launchd", verb: "removes", path: plist ? abs(plist) : null, schedule: null, files: [] }); return true; }
+    return false;
+  }
+  if (lower === "systemctl") {
+    const sub = lv.find((v) => !v.startsWith("-")) ?? "";
+    const units = vals.filter((v) => !v.startsWith("-") && v.toLowerCase() !== sub);
+    if (sub === "enable" || ((sub === "start" || sub === "restart") && units.some((u) => u.endsWith(".timer")))) {
+      acc.scheduleJob({ kind: "systemd", verb: "creates", path: null, schedule: sub === "enable" ? `enabled at boot or login: ${units.join(", ")}` : `timer ${units.join(", ")}`, files: [] });
+      return true;
+    }
+    return false;
+  }
+  return false;
 }
 
 /** Is `p` inside `dir` (the session's project directory)? */

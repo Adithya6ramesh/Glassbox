@@ -1,13 +1,14 @@
 // The gate: checkToolCall / checkToolResult / checkServerRequest (engine-spec §4, §6).
 import { Acc } from "../action/acc.js";
-import { pathCtxFrom } from "../action/paths.js";
+import { normalizePath, pathCtxFrom, type PathCtx } from "../action/paths.js";
+import { commandFiles, cronLines, desktopJob, JOB_LABEL, plistJob, psTaskJob, unitJob, type ScheduledJob } from "../action/schedule.js";
 import { classifyBuiltin, classifyMcp, type ToolCtx } from "../action/tools.js";
 import { snapshot } from "../intake/snapshot.js";
 import { parseJsonStrict, type IntakeIssue } from "../intake/json.js";
 import { resolveLimits } from "../limits.js";
 import { decide } from "../policy/decide.js";
 import { detectSecrets } from "../secrets/detect.js";
-import { redactValue } from "../secrets/redact.js";
+import { redactString, redactValue } from "../secrets/redact.js";
 import type {
   ActionRisk, ActionTag, Decision, Finding, Limits, LoadedRuleset, PolicyChoice, ServerRequestKind, SessionContext, SessionSignal, ToolDef, Verdict,
 } from "../types.js";
@@ -62,7 +63,7 @@ function validateCtx(c: unknown): Ctx | null {
   const limits = resolveLimits(raw.limits);
   const all = Array.isArray(raw.signals) ? raw.signals.filter((s) => isRecord(s) && typeof get(s, "kind") === "string" && typeof get(s, "atCall") === "number") : [];
   const callIndex = all.reduce((m, s) => Math.max(m, s.atCall), 0) + 1;
-  const signals = all.filter((s) => s.kind === "protection-degraded" || callIndex - s.atCall <= limits.signalTtlCalls);
+  const signals = all.filter((s) => s.kind === "protection-degraded" || s.kind === "scheduled-job" || callIndex - s.atCall <= limits.signalTtlCalls);
   const rs = raw.ruleset;
   return {
     raw,
@@ -257,6 +258,7 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   const findings: (Finding | null)[] = [...issueFs, ...scan.findings, ...integrityFindings(c, ff)];
   const cmdText = getString(args, "command") ?? getString(args, "query") ?? "";
   for (const cf of acc.findings) {
+    if (cf.ruleId === "CP-SELF-006") continue; // added below, one per job, with schedule and command
     findings.push(ff.make({ ruleId: cf.ruleId, location: cf.ruleId === "CP-EXFIL-040" ? "/arguments" : "/arguments", text: cmdText.slice(0, 2000), ...(cf.note && cf.ruleId === "CP-SHELL-001" ? {} : {}) }));
   }
   if (contradiction) findings.push(ff.make({ ruleId: "CP-CAP-002", location: "/descriptor/annotations" }));
@@ -295,6 +297,22 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
     findings.push(ff.make({ ruleId: "CP-FLOW-003", location: "/arguments", explanation: `${ff.rule("CP-FLOW-003")?.explanation ?? ""} ${why}`.trim() }));
   }
   if (sig.some((s) => s.kind === "injection-seen" && s.mentionedTools.includes(toolName))) findings.push(ff.make({ ruleId: "CP-INJECT-021", location: "" }));
+  // Scheduled jobs (rev 9): show what runs, when, and the full command; record the files it runs.
+  const jobs = acc.scheduledJobs.map((j) => enrichJob(j, toolName, args, cmdText, tc.pctx));
+  for (const j of jobs) {
+    findings.push(ff.make({ ruleId: "CP-SELF-006", location: "/arguments", text: cmdText.slice(0, 2000), explanation: jobExplanation(ff.rule("CP-SELF-006")?.explanation ?? "", j, toolName, args, cmdText, c.limits) }));
+  }
+  // Agent edits, moves or deletes of files an earlier, approved scheduled job runs (CP-SELF-007).
+  const fold = (s: string) => (c.raw.caseInsensitiveFs ? s.toLowerCase() : s);
+  for (const s of sig) {
+    if (s.kind !== "scheduled-job" || !Array.isArray(s.files)) continue; // signals come from the caller
+    const hit = s.files.filter((f): f is string => typeof f === "string").slice(0, 100).find((f) => acc.writes.some((w) => fold(w) === fold(f) || fold(f).startsWith(fold(w) + "/")));
+    if (hit !== undefined) {
+      findings.push(ff.make({ ruleId: "CP-SELF-007", location: "/arguments", text: hit, explanation: `This file runs as a scheduled job: ${hit} (${JOB_LABEL[s.job] ?? "scheduled job"}${s.schedule ? `, ${s.schedule}` : ""}; approved at call #${s.atCall}). Changing, moving or deleting it changes what the job runs.` }));
+      break;
+    }
+  }
+
   // Any local file upload once the session has read untrusted content (rev 8, Q1).
   if (acc.uploads.length > 0 && has("untrusted-content-seen")) {
     findings.push(ff.make({ ruleId: "CP-EXFIL-036", location: "/arguments", explanation: `${ff.rule("CP-EXFIL-036")?.explanation ?? ""} Untrusted content: ${chain(["untrusted-content-seen"])}.`.trim() }));
@@ -326,6 +344,9 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   const ext = risk.tags.filter((t) => EGRESS_TAGS.includes(t));
   if (ext.length > 0) signals.push({ kind: "external-write", serverId, toolName, tags: ext, atCall: at });
   if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: degradedReason(c), atCall: at });
+  // A job that creates or changes something runs its files later. The caller keeps this signal
+  // only if the call is approved and runs (engine-spec §4.5); it doesn't expire.
+  for (const j of jobs) if (j.verb !== "removes" && j.files.length > 0) signals.push({ kind: "scheduled-job", job: j.kind, schedule: j.schedule, files: j.files, atCall: at });
 
   const out = decide({
     kind: "call", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
@@ -538,4 +559,64 @@ export function checkServerRequestImpl(input: unknown, ctxIn: SessionContext, t0
     inputDigest: digest(msg),
     elapsedMs: Math.max(0, now() - t0),
   };
+}
+
+// ── Scheduled jobs (rev 9) ───────────────────────────────────────────────
+
+/** The text a tool call writes: Write content, Edit new_string, MultiEdit edits, MCP content. */
+function writtenContent(args: unknown): string {
+  if (!isRecord(args)) return "";
+  const parts: string[] = [];
+  for (const k of ["content", "new_string", "text", "body", "data"]) { const v = getString(args, k); if (v) parts.push(v); }
+  const edits = get(args, "edits");
+  if (Array.isArray(edits)) for (const e of edits.slice(0, 50)) { const v = getString(e, "new_string"); if (v) parts.push(v); }
+  return parts.join("\n").slice(0, 200_000);
+}
+
+function enrichJob(j: ScheduledJob, toolName: string, args: unknown, cmdText: string, pctx: PathCtx): ScheduledJob {
+  const content = writtenContent(args);
+  const source = content || cmdText;
+  let schedule = j.schedule;
+  const files = [...j.files];
+  const p = (j.path ?? "").toLowerCase();
+  const fromDef = j.kind === "launchd" && j.path ? plistJob(source)
+    : j.kind === "systemd" && j.path ? unitJob(source)
+    : j.kind === "autostart" && j.path ? desktopJob(source)
+    : j.kind === "task-scheduler" && schedule === null ? psTaskJob(cmdText)
+    : null;
+  if (fromDef) { schedule ??= fromDef.schedule; files.push(...fromDef.files); }
+  if (j.kind === "cron" && j.verb !== "removes") {
+    const period = ["hourly", "daily", "weekly", "monthly"].find((x) => p.includes(`/etc/cron.${x}/`));
+    if (period) schedule ??= period;
+    else {
+      const lines = cronLines(source);
+      if (lines.length > 0) { schedule ??= lines.map((l) => l.schedule).join("; "); for (const l of lines) files.push(...commandFiles(l.command)); }
+    }
+  }
+  if (j.kind === "at" && files.length === 0) files.push(...commandFiles(quoted(cmdText)));
+  if (j.kind === "boot-script") schedule ??= "at boot";
+  if (j.kind === "startup-folder") schedule ??= "at login";
+  const abs = (f: string) => normalizePath(f, pctx).path ?? f;
+  void toolName;
+  return { ...j, schedule, files: [...new Set(files.map(abs))].slice(0, 20) };
+}
+
+/** The text inside quotes (what `echo '…' | at …` runs). */
+function quoted(text: string): string {
+  const out: string[] = [];
+  for (const q of ["'", '"']) {
+    let i = text.indexOf(q);
+    while (i >= 0 && out.length < 20) { const e = text.indexOf(q, i + 1); if (e < 0) break; out.push(text.slice(i + 1, e)); i = text.indexOf(q, e + 1); }
+  }
+  return out.join(" ");
+}
+
+function jobExplanation(base: string, j: ScheduledJob, toolName: string, args: unknown, cmdText: string, limits: Limits): string {
+  const what = `${j.verb} a ${JOB_LABEL[j.kind]}${j.path ? ` (${j.path})` : ""}`;
+  const runs = j.files.length > 0 ? j.files.join(", ") : "not visible in the call";
+  const full = cmdText || `${toolName} ${getString(args, "file_path") ?? getString(args, "path") ?? ""}\n${writtenContent(args)}`.trim();
+  const red = redactString(full, undefined, limits).text;
+  const cap = 4000;
+  const shown = red.length > cap ? `${red.slice(0, cap)} … (${red.length - cap} more characters)` : red;
+  return `${base} This call ${what}. Schedule: ${j.schedule ?? "not visible in the call"}. Runs: ${runs}. Full command: ${shown}`;
 }

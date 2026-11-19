@@ -18,7 +18,8 @@ const WRITE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"]);
 export function writePath(path: string, acc: Acc, t: ToolCtx): void {
   const np = normalizePath(path, t.pctx);
   if (isProtectedWrite(np, t.pctx)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-  acc.persist(persistenceHit(np, t.pctx), "changes");
+  acc.persist(persistenceHit(np, t.pctx), "changes", np.path);
+  acc.wrote(np.path);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   if (p.includes("/.git/hooks/") || p.endsWith("/.git/config") || p.includes("/.husky/") || p.endsWith("/.envrc") || p.endsWith("/.bashrc") || p.endsWith("/.zshrc") || p.endsWith("/.profile") || p.endsWith("/.bash_profile") || p.endsWith("/.pre-commit-config.yaml") || p.endsWith("profile.ps1") || p.includes("/library/launchagents/") || p.includes("/.config/systemd/user/")) {
     acc.tag("high-risk", "config.agent");
@@ -170,7 +171,8 @@ export function classifyMcp(name: string, args: unknown, descriptor: ToolDef | u
       const np = normalizePath(v, t.pctx);
       if (isProtectedRead(np, t.pctx)) acc.protect("CP-SELF-002", "reads a Glassbox credential file");
       else if (!isRead && isProtected(np, t.pctx)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-      else if (!isRead && persistenceHit(np, t.pctx)) acc.persist(persistenceHit(np, t.pctx), "changes");
+      else if (!isRead && persistenceHit(np, t.pctx)) acc.persist(persistenceHit(np, t.pctx), "changes", np.path);
+      if (!isRead) acc.wrote(np.path);
       else if (isRead) { const label = sensitiveLabel(np, t.pctx); if (label) { acc.tags.add("fs.read.sensitive"); acc.sensitive.push(label); acc.sensitiveArgs = true; acc.find("CP-EXFIL-040", label); } }
     }
   }
