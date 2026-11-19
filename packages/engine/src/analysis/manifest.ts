@@ -74,8 +74,11 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
 
   // Layer 1 over every field.
   const fields: Field[] = manifestFields(m, limits.maxTools);
-  const scan = scanFields(fields, "manifest", ff, ruleset.rules, limits, true);
+  // The grader's time backstop (spec §11: hardStopMs 2,000 for the grader).
+  const deadline = t0 + (opts?.limits?.hardStopMs ?? 2000);
+  const scan = scanFields(fields, "manifest", ff, ruleset.rules, limits, true, deadline);
   findings.push(...scan.findings);
+  if (scan.timedOut) { partial = true; degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
   if (scan.windowed) { partial = true; degradedReasons.push("CP-LIMIT-006"); }
   if (scan.decodeExhausted) { degradedReasons.push("CP-LIMIT-007"); findings.push(ff.make({ ruleId: "CP-LIMIT-007", location: "" })); }
 
@@ -94,7 +97,8 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
   const ownNames = new Set(tools.map((t) => getString(t, "name") ?? ""));
   const known = (opts?.knownTools ?? []).filter((k) => isRecord(k) && typeof k.name === "string");
   const capabilityProfile: { tool: string; risk: ActionRisk }[] = [];
-  const poisonRules = ruleset.rules.filter((r) => ["CP-POISON-001", "CP-POISON-002", "CP-POISON-003"].includes(r.id)) as RuleDef[];
+  const poisonRules = ruleset.rules.filter((r) => ["CP-POISON-001", "CP-POISON-002", "CP-POISON-003", "CP-POISON-005"].includes(r.id)) as RuleDef[];
+  let timeNoted = scan.timedOut;
   tools.forEach((t, i) => {
     const base = `/tools/${i}`;
     const name = getString(t, "name");
@@ -110,6 +114,12 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
     if (prof.acc.level === "high-risk" && !isRecord(ann)) findings.push(ff.make({ ruleId: "CP-HYGIENE-002", location: base, text: name }));
     if (prof.contradiction) findings.push(ff.make({ ruleId: "CP-CAP-002", location: `${base}/annotations`, text: name }));
     capabilityProfile.push({ tool: name, risk: { level: prof.acc.level, tags: [...prof.acc.tags].sort(), unanalyzable: false, selfProtection: false, reasons: ["what the metadata says the tool can do"] } });
+
+    // Past the grader's time budget, keep only the cheap per-tool checks above (red team, Step 5).
+    if (performance.now() > deadline) {
+      if (!timeNoted) { timeNoted = true; partial = true; degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
+      return;
+    }
 
     // Capability mismatch: a harmless-sounding purpose asking for powerful inputs.
     const purpose = [...nameWords(name), ...nameWords((desc ?? "").split(/[.\n]/)[0] ?? "").slice(0, 6)];
@@ -171,6 +181,18 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
       }
     }
   });
+
+  // Split payloads across tools (red team, Step 5): every tool's description, in order.
+  const descs = tools.map((t, i) => ({ pointer: `/tools/${i}/description`, text: getString(t, "description") ?? "" })).filter((d) => d.text.length > 0);
+  if (descs.length >= 2 && performance.now() < deadline) {
+    const joined = descs.map((d) => d.text).join(" ");
+    const scanJ = scanField(joined, limits.maxFieldScanBytes, { bytes: 0 }, 0);
+    for (const r of poisonRules) {
+      if (!matchRule(r, scanJ, undefined)) continue;
+      const single = descs.some((d) => matchRule(r, scanField(d.text, limits.maxFieldScanBytes, { bytes: 0 }, 0), undefined));
+      if (!single) { findings.push(ff.make({ ruleId: "CP-POISON-030", location: "/tools", text: joined, via: ["concat"], related: descs.map((d) => d.pointer).slice(0, 10) })); break; }
+    }
+  }
 
   // Session id shape (caller-reported).
   const sid = opts?.sessionIdShape;

@@ -20,7 +20,7 @@ export interface FieldScan {
   decodeExhausted: boolean;
 }
 
-const RE_WORDCH = /^[\p{L}\p{N}]$/u;
+const RE_WORDCH = /^[\p{L}\p{M}\p{N}]$/u;
 const RE_WS = /^\p{White_Space}$/u;
 
 function rawNormOf(s: string): string {

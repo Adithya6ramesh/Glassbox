@@ -406,7 +406,9 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
     case "xargs": {
       const rest = skipOpts(args, new Set(["-n", "-L", "-P", "-I", "-i", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--delimiter", "--replace", "--arg-file"]));
       if (rest.length === 0) return;
-      return unwrap(rest);
+      // The arguments xargs adds come from stdin, so they're unknown (red team, Step 5).
+      const unknownArg: WordInfo = { word: { parts: [{ t: "var", name: "XARGS", braced: false, quoted: false }], raw: "<stdin>", brace: false }, value: null, pathValue: null, suffix: "", dynamic: true, glob: false, substs: [] };
+      return unwrap([...rest, unknownArg]);
     }
     case "parallel": return unwrap(skipOpts(args, new Set(["-j", "--jobs"])));
     case "npx": case "bunx": case "pnpx": {
@@ -708,9 +710,29 @@ function remove(lower: string, args: WordInfo[], c: Ctx2): void {
   }
 }
 
+const FIND_NARROWING = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-newer", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-size", "-user", "-group", "-perm", "-empty", "-links", "-inum", "-samefile", "-lname", "-ilname", "-maxdepth"]);
+
 function find(args: WordInfo[], c: Ctx2, unwrapDepth: number): void {
-  const { acc } = c;
+  const { acc, pctx } = c;
   if (args.some((a) => a.value === "-delete")) acc.tag("high-risk", "fs.delete");
+  // Red team (Step 5): `find . -delete` or `find ~ -exec rm -rf {} +` with nothing narrowing
+  // the match deletes everything under the root, like `rm -rf .`.
+  const deletes = args.some((a) => a.value === "-delete") || args.some((a, k) => (a.value === "-exec" || a.value === "-execdir") && ["rm", "unlink", "shred"].includes(args[k + 1]?.value ?? ""));
+  if (deletes && !args.some((a) => FIND_NARROWING.has(a.value ?? ""))) {
+    const roots = [];
+    for (const a of args) { if ((a.value ?? "-").startsWith("-") || a.value === "(" || a.value === "!") break; roots.push(a); }
+    if (roots.length === 0) roots.push({ word: { parts: [], raw: ".", brace: false }, value: ".", pathValue: ".", suffix: ".", dynamic: false, glob: false, substs: [] } as WordInfo);
+    const home = normalizePath("~", pctx).path;
+    const cwd = pctx.cwd !== null ? normalizePath(pctx.cwd, pctx).path : null;
+    for (const r of roots) {
+      const np = npOf(r, pctx);
+      const p = np?.path ?? null;
+      if (r.pathValue === null || p === null || p === "/" || p === home || p === cwd || /^(\/[^/]*|[a-z]:\/[^/]*)$/i.test(p) || (cwd !== null && cwd.startsWith(p + "/"))) {
+        destroy(acc, "deletes everything under a project, home or root directory");
+        break;
+      }
+    }
+  }
   for (let i = 0; i < args.length; i++) {
     const v = args[i]?.value;
     if (v === "-exec" || v === "-execdir" || v === "-ok" || v === "-okdir") {
@@ -973,9 +995,18 @@ function git(args: WordInfo[], c: Ctx2): void {
       acc.network = true;
       return;
     case "": return;
+    case "lfs":
+      if (["push", "pull", "fetch", "clone"].includes(rv[0] ?? "")) { net("net.fetch.vcs"); return; }
+      acc.tag("write-reversible", "exec.unknown");
+      return;
+    case "flow": case "absorb": case "annex": case "branchless": case "machete": case "town": case "extras": case "crypt": case "secret":
+      acc.tag("write-reversible", "exec.unknown");
+      return;
     default:
       if (args[i]?.value === null) { acc.unanalyzable("git subcommand isn't literal"); return; }
-      acc.tag("write-reversible", "exec.unknown");
+      // Red team (Step 5): `git config alias.p 'push -f'` earlier, then `git p` now.
+      // An unknown subcommand may be an alias for anything, including a force-push.
+      acc.unanalyzable(`unknown git subcommand '${sub.slice(0, 30)}' (it could be an alias)`);
   }
 }
 

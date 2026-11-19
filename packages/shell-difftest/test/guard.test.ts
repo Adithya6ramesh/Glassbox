@@ -65,6 +65,11 @@ describe("T-DIFF location guard", () => {
     expect(tdiffAllowed(probe({ env: { GLASSBOX_TDIFF_SANDBOX: "docker" }, files: { "/.dockerenv": "" } })).allowed).toBe(false);
   });
 
+  it("in Linux CI, T-DIFF really runs (a silent skip there fails the build)", () => {
+    if (!(process.env["GITHUB_ACTIONS"] === "true" && process.env["CI"] === "true" && process.platform === "linux")) return;
+    expect(findBash()).toBe("/bin/bash");
+  });
+
   it("on this machine, unless it is CI or the sandbox, no bash is offered and runInBash refuses", async () => {
     const inCI = process.env["GITHUB_ACTIONS"] === "true" && process.platform === "linux";
     const inSandbox = process.env["GLASSBOX_TDIFF_SANDBOX"] === "docker" && process.platform === "linux";

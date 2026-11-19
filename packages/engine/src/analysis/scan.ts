@@ -14,6 +14,7 @@ export interface ScanOutcome {
   windowed: boolean;
   decodeExhausted: boolean;
   scans: Map<Field, FieldScan>;
+  timedOut: boolean;
 }
 
 export function mixedScript(text: string): { start: number; end: number } | null {
@@ -28,14 +29,16 @@ export function mixedScript(text: string): { start: number; end: number } | null
   return null;
 }
 
-export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory, rules: readonly import("../types.js").RuleDef[], limits: Limits, hidden: boolean): ScanOutcome {
+export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory, rules: readonly import("../types.js").RuleDef[], limits: Limits, hidden: boolean, deadline = Number.POSITIVE_INFINITY): ScanOutcome {
   const findings: (Finding | null)[] = [];
   const scans = new Map<Field, FieldScan>();
   const budget = { bytes: limits.maxDecodedBytes };
   let windowed = false;
   let decodeExhausted = false;
   const declarative = rules.filter((r) => r.matcher.type !== "structural" && r.surfaces.includes(surface));
+  let timedOut = false;
   for (const f of fields) {
+    if (performance.now() > deadline) { timedOut = true; break; }
     if (f.text.length === 0) continue;
     const scan = scanField(f.text, limits.maxFieldScanBytes, budget, limits.maxDecodeDepth);
     scans.set(f, scan);
@@ -44,7 +47,7 @@ export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory
     for (const r of declarative) {
       if (!roleMatches(r.target.roles, f.role)) continue;
       if (r.target.keys === false && f.kind === "key") continue;
-      const m = matchRule(r, scan, f.keyName);
+      const m = matchRule(r, scan, f.kind === "key" ? undefined : f.keyName);
       if (m) findings.push(ff.make({ ruleId: r.id, location: f.pointer, text: f.text, start: m.start, end: m.end, via: m.via, severity: m.severity }));
     }
     if (!hidden) continue;
@@ -71,5 +74,5 @@ export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory
     const blob = seg.decoded.find((d) => !d.nested);
     if (blob) findings.push(ff.make({ ruleId: blob.end - blob.start >= 256 ? "CP-HIDDEN-010" : "CP-HIDDEN-007", location: f.pointer, text: f.text, start: blob.start, end: blob.end }));
   }
-  return { findings: findings.filter((x): x is Finding => x !== null), windowed, decodeExhausted, scans };
+  return { findings: findings.filter((x): x is Finding => x !== null), windowed, decodeExhausted, scans, timedOut };
 }

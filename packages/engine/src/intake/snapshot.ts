@@ -5,7 +5,7 @@ import { parseJsonStrict, type IntakeIssue } from "./json.js";
 import { deepFreeze } from "../util/misc.js";
 
 export interface SnapshotResult { value: unknown; issues: IntakeIssue[]; degraded: boolean }
-export interface SnapshotOptions { maxDepth?: number; maxNodes?: number; maxStringBytes?: number }
+export interface SnapshotOptions { maxDepth?: number; maxNodes?: number; maxStringBytes?: number; maxBytes?: number }
 
 const ptrSeg = (k: string | number) => String(k).replace(/~/g, "~0").replace(/\//g, "~1");
 
@@ -15,6 +15,8 @@ export function snapshot(input: unknown, opts: SnapshotOptions = {}): SnapshotRe
   const maxNodes = opts.maxNodes ?? 100_000;
   let degraded = false;
   let nodes = 0;
+  let bytes = 0;
+  const maxBytes = opts.maxBytes ?? Number.POSITIVE_INFINITY;
   const onPath = new Set<object>();
 
   interface Job { src: unknown; set: (v: unknown) => void; depth: number; pointer: string; exit?: object }
@@ -27,7 +29,13 @@ export function snapshot(input: unknown, opts: SnapshotOptions = {}): SnapshotRe
     const src = job.src;
     if (++nodes > maxNodes) { issues.push({ code: "CP-LIMIT-003", pointer: job.pointer }); degraded = true; break; }
     try {
-      if (src === null || typeof src === "boolean" || typeof src === "string") { job.set(src); continue; }
+      if (typeof src === "string") {
+        bytes += src.length;
+        if (bytes > maxBytes) { issues.push({ code: "CP-LIMIT-001", pointer: job.pointer }); degraded = true; break; }
+        job.set(src);
+        continue;
+      }
+      if (src === null || typeof src === "boolean") { job.set(src); continue; }
       if (typeof src === "number") { job.set(Number.isFinite(src) ? src : null); continue; }
       if (typeof src !== "object") { issues.push({ code: "CP-PARSE-009", pointer: job.pointer }); continue; }
       if (src instanceof Uint8Array) {

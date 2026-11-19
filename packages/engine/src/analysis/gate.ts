@@ -86,7 +86,7 @@ export function intake(input: unknown, limits: Limits): Intake {
     const r = parseJsonStrict(input, { maxDepth: limits.maxDepth, maxNodes: limits.maxNodes });
     return { value: r.value, issues: r.issues, degraded: r.degraded, tooBig: false };
   }
-  const s = snapshot(input, { maxDepth: limits.maxDepth, maxNodes: limits.maxNodes });
+  const s = snapshot(input, { maxDepth: limits.maxDepth, maxNodes: limits.maxNodes, maxBytes: limits.maxInputBytes });
   return { value: s.value, issues: s.issues, degraded: s.degraded, tooBig: false };
 }
 
@@ -338,15 +338,21 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
   // CP-INJECT-020: a session tool named next to directive language.
   const sessionTools = new Map<string, boolean>();
   for (const s of c.raw.servers ?? []) for (const t of s.toolNames ?? []) sessionTools.set(t, (s.highRiskTools ?? []).includes(t));
+  // Red team (Step 5): "use the GitHub tool to …" names a server, not a tool.
+  for (const s of c.raw.servers ?? []) {
+    if (s.serverId === serverId) continue;
+    for (const n of [s.serverId, ...(s.identity?.issuerTags ?? [])]) if (typeof n === "string" && n.length >= 4) sessionTools.set(n, false);
+  }
   const mentioned = new Set<string>();
   for (const f of fields) {
     const words = tokenize(f.text.slice(0, c.limits.maxFieldScanBytes));
     const lowerWords = new Set(words.map((w) => w.w.toLowerCase()));
     const directive = [...DIRECTIVES].some((d) => lowerWords.has(d));
     for (const name of sessionTools.keys()) {
-      if (name.length >= 3 && f.text.includes(name) && directive) {
+      if (name.length >= 3 && directive && (f.text.includes(name) || (name.length >= 4 && lowerWords.has(name.toLowerCase())))) {
         mentioned.add(name);
-        findings.push(ff.make({ ruleId: "CP-INJECT-020", location: f.pointer, text: f.text, start: f.text.indexOf(name), end: f.text.indexOf(name) + name.length, ...(sessionTools.get(name) ? { severity: "critical" as const } : {}) }));
+        const at = Math.max(0, f.text.toLowerCase().indexOf(name.toLowerCase()));
+        findings.push(ff.make({ ruleId: "CP-INJECT-020", location: f.pointer, text: f.text, start: at, end: at + name.length, ...(sessionTools.get(name) ? { severity: "critical" as const } : {}) }));
       }
     }
   }
