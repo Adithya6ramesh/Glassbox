@@ -6,7 +6,7 @@ import { scoreFindings } from "../grade/score.js";
 import { resolveLimits } from "../limits.js";
 import { EMBEDDED_BASELINE } from "../ruleset/baseline.js";
 import type { ActionRisk, AnalyzeOptions, Finding, LoadedRuleset, RuleDef, ServerReport, ToolDef } from "../types.js";
-import { get, getString, isRecord, utf8Length } from "../util/misc.js";
+import { get, getString, isRecord, trimEndChars, utf8Length } from "../util/misc.js";
 import { ENGINE_VERSION } from "../version.js";
 import { manifestFields, type Field } from "./fields.js";
 import { dedupe, FindingFactory, sortFindings } from "./findings.js";
@@ -16,10 +16,13 @@ import { scanFields } from "./scan.js";
 
 const BUILTIN_TOOL_NAMES = ["Bash", "PowerShell", "Write", "Edit", "MultiEdit", "Read", "WebFetch", "WebSearch", "Grep", "Glob", "Agent", "Task", "NotebookEdit"];
 const DIRECTIVE_WORDS = new Set(["instead", "always", "before", "after", "deprecated", "must", "never", "don't", "dont", "should", "replace", "override", "first"]);
-const STRONG_DIRECTIVES = new Set(["must", "always", "before", "instead", "first", "mandatory", "required", "never", "redirect", "redirected", "priority", "replace", "prior"]);
+const STRONG_DIRECTIVES = new Set(["must", "always", "before", "instead", "first", "mandatory", "required", "never", "redirect", "redirected", "priority", "replace", "prior", "should", "change", "modify", "override", "rewrite", "append"]);
+const SOFT_DIRECTIVES = new Set(["instead", "should", "replace"]);
+const TOOL_LEAD = new Set(["using", "use", "call", "calling", "run", "running", "invoke", "invoking", "tool"]);
+const CAMEL = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
 const IDENT = /^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+$/;
 
-/** Identifiers with a _ or - inside backticks or quotes: `send_email`, 'read_file', "map-traffic". */
+/** Tool-shaped names inside backticks or quotes: `send_email`, 'read_file', "map-traffic", 'sendSimpleMail'. */
 function quotedIdentifiers(text: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < text.length && out.length < 20; i++) {
@@ -29,9 +32,26 @@ function quotedIdentifiers(text: string): string[] {
     if (end < 0) break;
     if (end - i - 1 <= 64) {
       const inner = text.slice(i + 1, end);
+      // camelCase in quotes is usually a field name ('endCursor'); it counts only when led (ledIdentifiers).
       if (IDENT.test(inner)) out.push(inner);
     }
     i = end;
+  }
+  return out;
+}
+
+/** Tool-shaped names right after "using", "call", "run"…, quoted or not (Before using search_files, call write_file; use 'sendSimpleMail'). */
+function ledIdentifiers(text: string): string[] {
+  const words = text.slice(0, 20_000).split(/\s+/);
+  const out: string[] = [];
+  for (let i = 1; i < words.length && out.length < 20; i++) {
+    const prev = (words[i - 1] ?? "").toLowerCase();
+    const prev2 = (words[i - 2] ?? "").toLowerCase();
+    // "use X" or "use the X tool" ("use the 'endCursor' from…" names a field, not a tool).
+    const viaThe = prev === "the" && TOOL_LEAD.has(prev2) && (words[i + 1] ?? "").toLowerCase().startsWith("tool");
+    if (!TOOL_LEAD.has(prev) && !viaThe) continue;
+    const w = trimEndChars((words[i] ?? "").replace(/^[(`'"]+/, ""), ".,;:)!?`'\"");
+    if (w.length <= 64 && (IDENT.test(w) || CAMEL.test(w))) out.push(w);
   }
   return out;
 }
@@ -215,12 +235,15 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
     // Directives about a tool named in quotes that isn't this tool (rev 7, from MCPTox): works
     // without knowing the other server. Names and values from the tool's own schema don't count.
     if (!findings.some((f) => f?.ruleId === "CP-SHADOW-001" && f.location.startsWith(base))) {
-      const own = new Set<string>([name.toLowerCase(), ...schemaStrings(get(t, "inputSchema")).map((x) => x.toLowerCase())]);
+      // Tools on this same server are its own business (a real scan grades the whole server).
+      const own = new Set<string>([...[...ownNames].map((x) => x.toLowerCase()), ...schemaStrings(get(t, "inputSchema")).map((x) => x.toLowerCase())]);
       for (const s of strs) {
         const text = s.text.slice(0, limits.maxFieldScanBytes);
         const lowerWords = new Set(tokenize(text).map((w) => w.w.toLowerCase()));
         if (![...STRONG_DIRECTIVES].some((d) => lowerWords.has(d))) continue;
-        const ref = quotedIdentifiers(text).find((q) => !own.has(q.toLowerCase()));
+        // Unquoted names need a demand, not a recommendation ("use stream_file instead" is fine).
+        const demands = [...STRONG_DIRECTIVES].some((d) => !SOFT_DIRECTIVES.has(d) && lowerWords.has(d));
+        const ref = [...quotedIdentifiers(text), ...(demands ? ledIdentifiers(text) : [])].find((q) => !own.has(q.toLowerCase()));
         if (ref) { findings.push(ff.make({ ruleId: "CP-SHADOW-002", location: s.pointer, text, start: text.indexOf(ref), end: text.indexOf(ref) + ref.length })); break; }
       }
     }
