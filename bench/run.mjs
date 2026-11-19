@@ -253,7 +253,7 @@ writeFileSync(here(`./results/${process.platform}.md`), `${md}\n`);
 writeFileSync(here(`./results/${process.platform}.json`), `${JSON.stringify({ machine, quality: q, dev, latency: lat, sweep, backstop: stop, coldStart: cold }, null, 2)}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
 
-// ── Regression gate (detection only; timing is machine-dependent) ───────
+// ── Regression gate (detection, plus one wide-margin timing check) ──────
 if (CHECK) {
   const base = JSON.parse(readFileSync(here("./baseline.json"), "utf8"));
   const bad = [];
@@ -263,6 +263,9 @@ if (CHECK) {
     if (r.fn > b.maxFn) bad.push(`${r.cat}: ${r.fn} missed attacks (baseline ${b.maxFn})`);
     if (r.fp > b.maxFp) bad.push(`${r.cat}: ${r.fp} false positives (baseline ${b.maxFp})`);
   }
-  if (bad.length) { console.error(`\nDetection regressed:\n  ${bad.join("\n  ")}`); process.exit(1); }
-  console.log("\nDetection is at or better than bench/baseline.json.");
+  // One timing gate with a wide margin: a 64 KB result must finish inside the 100 ms hard stop
+  // (about 45 ms locally). Found after 244 new phrases made it 124 ms and degraded benign logs.
+  for (const s of sweep) if (s.bytes === 64 * 1024 && s.degraded.includes("CP-LIMIT-010")) bad.push(`${s.kind} 64 KB result hit the hard stop (${s.ms.toFixed(0)} ms)`);
+  if (bad.length) { console.error(`\nDetection or speed regressed:\n  ${bad.join("\n  ")}`); process.exit(1); }
+  console.log("\nDetection is at or better than bench/baseline.json, and 64 KB results finish inside the hard stop.");
 }

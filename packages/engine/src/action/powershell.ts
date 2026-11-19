@@ -1,9 +1,10 @@
 // PowerShell analysis (engine-spec §7.4, rev 3/4): hand-written tokenizer, alias table,
 // cmdlet classes; native programs go through the §7.3 command table.
 import { Acc } from "./acc.js";
-import { isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
+import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
+import { allLoopback, classifyUpload, recordUpload } from "./upload.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
 
 class PsUnanalyzable extends Error {
@@ -277,8 +278,7 @@ function destroysTopLevel(path: string | null, pctx: PathCtx): boolean {
   const lp = path.toLowerCase(), lh = home.toLowerCase();
   if (/^[a-z]:\/?\*?$/i.test(path) || path === "/" || path === "/*") return true;
   if (lh !== "" && (lp === lh || lp === lh + "/")) return true;
-  if (lh !== "" && lp.startsWith(lh + "/")) return !lp.slice(lh.length + 1).replace(/\/$/, "").includes("/");
-  return false;
+  return homeTopLevel(path, pctx);
 }
 
 function tokText(t: Tok | null | undefined): { value: string | null; pathValue: string | null } {
@@ -471,10 +471,18 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("deletes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "deletes a file that controls the agent or Glassbox");
-      const persist = persistenceLabel(p, pctx);
-      if (persist) acc.protect("CP-SELF-004", `deletes a ${persist}`);
+      acc.persist(persistenceHit(p, pctx), "deletes");
       if (recurse && !narrowed && destroysTopLevel(p.path, pctx)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", "deletes a whole drive, the home directory or a top-level folder in it"); }
     }
+    return;
+  }
+  if (cmdlet === "register-scheduledtask" || cmdlet === "register-scheduledjob" || cmdlet === "new-service") {
+    acc.protect("CP-SELF-004", `${cmdlet} installs a task or service that runs later`);
+    return;
+  }
+  if (cmdlet === "clear-history" || (cmdlet === "set-psreadlineoption" && (hasParam(params, "-AddToHistoryHandler") || /savenothing/i.test(el.map((t) => tokText(t).value ?? "").join(" "))))) {
+    acc.tag("high-risk", "fs.delete");
+    acc.find("CP-ACTION-030", `${cmdlet} clears or stops PowerShell history`);
     return;
   }
   if (DISK_WIPE.has(cmdlet)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", `${cmdlet} erases a disk, partition or the recycle bin`); return; }
@@ -488,14 +496,35 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("writes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-      const persist = persistenceLabel(p, pctx);
-      if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
+      acc.persist(persistenceHit(p, pctx), "changes");
       const lp = (p.path ?? "").toLowerCase();
       if (lp.endsWith("profile.ps1") || lp.includes("/.git/hooks/")) acc.tag("high-risk", "config.agent");
     }
     return;
   }
-  if (NETWORK.has(cmdlet)) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }
+  if (NETWORK.has(cmdlet)) {
+    const dest = paramValue(el, "-Uri") ?? paramValue(el, "-SmtpServer") ?? (cmdlet === "send-mailmessage" ? null : positional(el)[0] ?? null);
+    const loop = allLoopback(dest ? [tokText(dest).value] : []);
+    if (!loop) { acc.tag("high-risk", "net.egress"); acc.network = true; }
+    // Uploads: -InFile, and -Attachments (comma-separated).
+    const files: (string | null)[] = [];
+    const inFile = paramValue(el, "-InFile");
+    if (inFile) files.push(tokText(inFile).pathValue);
+    const att = paramValue(el, "-Attachments");
+    if (att) { const v = tokText(att).pathValue; if (v === null) files.push(null); else files.push(...v.split(",").map((x) => x.trim()).filter(Boolean)); }
+    if (cmdlet === "send-mailmessage") {
+      // Further positional words after -Attachments a, b are more attachments.
+      const i = el.findIndex((t) => t.k === "param" && t.v.toLowerCase() === "-attachments");
+      for (let k = i + 2; i >= 0 && k < el.length && el[k]?.k !== "param"; k++) { const t = tokText(el[k]); if (t.pathValue !== null && t.pathValue !== ",") files.push(t.pathValue.replace(/^,|,$/g, "")); }
+    }
+    if (!loop) {
+      for (const f of files) {
+        const p = f === null ? null : np({ k: "word", v: f, dyn: false } as Tok, pctx);
+        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd), f ?? "a file named at run time");
+      }
+    }
+    return;
+  }
   if (PERM.has(cmdlet)) { acc.tag("high-risk", "perm.change"); return; }
   if (cmdlet === "new-object") {
     if (el.some((t) => (t.k === "word" || t.k === "str") && /net\.(webclient|sockets)|system\.net/i.test(t.v))) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }

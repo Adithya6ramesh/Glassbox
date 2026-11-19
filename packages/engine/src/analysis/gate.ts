@@ -295,6 +295,10 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
     findings.push(ff.make({ ruleId: "CP-FLOW-003", location: "/arguments", explanation: `${ff.rule("CP-FLOW-003")?.explanation ?? ""} ${why}`.trim() }));
   }
   if (sig.some((s) => s.kind === "injection-seen" && s.mentionedTools.includes(toolName))) findings.push(ff.make({ ruleId: "CP-INJECT-021", location: "" }));
+  // Any local file upload once the session has read untrusted content (rev 8, Q1).
+  if (acc.uploads.length > 0 && has("untrusted-content-seen")) {
+    findings.push(ff.make({ ruleId: "CP-EXFIL-036", location: "/arguments", explanation: `${ff.rule("CP-EXFIL-036")?.explanation ?? ""} Untrusted content: ${chain(["untrusted-content-seen"])}.`.trim() }));
+  }
 
   // Limits / degraded.
   const degradedReasons: string[] = [];

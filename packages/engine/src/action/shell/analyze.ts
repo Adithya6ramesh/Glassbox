@@ -1,9 +1,10 @@
 // Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
 import { Acc } from "../acc.js";
+import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
-  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
+  coversProtectedRead, homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
@@ -145,6 +146,9 @@ export function analyzeScript(script: Script, st: ShellState, acc: Acc): void {
   for (const cmd of script.commands) analyzeSimple(cmd, st, acc, cwdStack, script.functions);
   if (acc.network && acc.sensitiveArgs) acc.find("CP-EXFIL-030", "sensitive file and network call in one command");
   else if (acc.network && acc.envDump) acc.find("CP-EXFIL-030", "environment variables and a network call in one command");
+  if (acc.newRemotes.length > 0 && acc.pushedTo.some((r) => acc.newRemotes.includes(r) || r === "\u0000dynamic" || acc.newRemotes.includes("\u0000dynamic"))) {
+    acc.find("CP-EXFIL-034", "adds or repoints a git remote and pushes to it in the same command");
+  }
 }
 
 function analyzeSubsts(w: WordInfo, st: ShellState, acc: Acc, commandPosition: boolean): void {
@@ -229,6 +233,11 @@ function handleRedirect(r: Redirect, st: ShellState, acc: Acc, pctx: PathCtx, cm
   if (isWrite) {
     if (np === null) { acc.unanalyzable("writes to a path that isn't known statically"); return; }
     if (/^\/dev\/(sd|nvme|hd|disk|xvd|vd|mmcblk)/.test(np.path ?? "")) { destroy(acc, "overwrites a disk device"); return; }
+    if (np.path === "/proc/sysrq-trigger") { acc.tag("high-risk", "infra.change"); acc.reason("triggers a kernel reboot, power-off or crash through sysrq"); return; }
+    if ((r.op === ">" || r.op === ">|") && np.path !== null && isLogOrHistory(np.path)) {
+      acc.tag("high-risk", "fs.delete");
+      acc.find("CP-ACTION-030", "empties a log or shell history file");
+    }
     writeTarget(np, acc, pctx);
     acc.tag("write-reversible", "fs.write");
     return;
@@ -246,8 +255,7 @@ function destroy(acc: Acc, why: string): void {
 /** Checks for a path that is written, created, moved, deleted, chmod-ed or linked. */
 function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): void {
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-  const persist = persistenceLabel(np, pctx);
-  if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
+  acc.persist(persistenceHit(np, pctx), "changes");
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
@@ -349,6 +357,26 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   const flagsOnly = (allowed: string[]) => args.every((a) => a.value !== null && allowed.includes(a.value));
   if ((lower === "printenv" && args.length === 0) || (["set", "export", "declare", "typeset"].includes(lower) && flagsOnly(["-p", "-x", "-px", "-xp"]))) acc.envDump = true;
   if (lower === "compgen" && hasFlag(args, "-e", "-v")) acc.envDump = true;
+
+  // Credential dumping tools, run directly or as a script (python laZagne.py).
+  if ([name, ...args.map((a) => a.value ?? "")].some((v) => /^(lazagne|mimikatz|pypykatz|secretsdump|procdump)/i.test(v.slice(v.lastIndexOf("/") + 1)))) {
+    acc.tags.add("fs.read.sensitive");
+    acc.raise("high-risk");
+    acc.sensitive.push("credential-dump");
+    acc.sensitiveArgs = true;
+    acc.find("CP-EXFIL-040", "runs a credential dumping tool");
+  }
+
+  // Clearing shell history or system logs hides what happened (warn, CP-ACTION-030).
+  const clearsHistory = (lower === "history" && args.some((a) => /^-[a-z]*c/.test(a.value ?? "") || a.value === "-d")) ||
+    (lower === "unset" && args.some((a) => a.value === "HISTFILE")) ||
+    (lower === "journalctl" && args.some((a) => (a.value ?? "").startsWith("--vacuum") || a.value === "--rotate"));
+  if (clearsHistory) {
+    acc.tag("high-risk", "fs.delete");
+    acc.find("CP-ACTION-030", `${lower} clears shell history or system logs`);
+    acc.reason("clears shell history or logs");
+    return;
+  }
 
   // DNS lookups of a name built from command output or variables: data smuggled out in DNS.
   if (["nslookup", "dig", "host", "drill", "ping", "ping6", "resolvectl", "getent"].includes(lower)) {
@@ -504,6 +532,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if (["psql", "mysql", "sqlite3", "mariadb", "sqlcmd", "duckdb", "clickhouse-client"].includes(lower)) return dbCli(lower, args, c);
 
   // ── Classes from the command table ─────────────────────────────────────
+  if (lower === "redis-cli" || lower === "valkey-cli" || lower === "keydb-cli") {
+    if (args.some((a) => ["flushall", "flushdb"].includes((a.value ?? "").toLowerCase()))) {
+      acc.tag("high-risk", "db.unscoped-write", "db.delete");
+      acc.reason("deletes every key in the Redis database");
+      return;
+    }
+  }
   if (REMOVE.has(lower)) return remove(lower, args, c);
   if (lower === "find") return find(args, c, unwrapDepth);
   if (lower === "dd") {
@@ -531,7 +566,7 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if (lower === "rsync") return rsync(args, c);
   if (NET.has(lower)) return network(lower, args, c);
   if (["docker", "podman"].includes(lower)) return docker(args, c);
-  if (["kubectl", "helm", "terraform", "tofu", "pulumi", "vercel", "netlify", "fly", "flyctl", "wrangler", "firebase", "heroku", "aws", "gcloud", "az", "doctl", "serverless", "sls", "cdk", "eb", "railway", "render"].includes(lower)) return deploy(lower, args, c);
+  if (["kubectl", "helm", "terraform", "tofu", "pulumi", "vercel", "netlify", "fly", "flyctl", "wrangler", "firebase", "heroku", "aws", "gcloud", "gsutil", "az", "doctl", "serverless", "sls", "cdk", "eb", "railway", "render"].includes(lower)) return deploy(lower, args, c);
   if (["twine", "gem_push"].includes(lower)) { acc.tag("high-risk", "publish.public", "net.egress"); acc.network = true; return; }
   if (lower === "sed") {
     if (!hasFlag(args, "-i", "--in-place")) return;
@@ -555,9 +590,31 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
   if (WRITE.has(lower)) return writeOps(operands(args, new Set(["-t", "--target-directory", "-m", "--mode", "-S", "--suffix", "-o", "-g", "-p"])), c, "fs.write");
   if (READ.has(lower)) return;
-  if (["kill", "pkill", "killall", "systemctl", "service", "launchctl", "shutdown", "reboot", "halt"].includes(lower)) {
-    if (["shutdown", "reboot", "halt"].includes(lower)) acc.tag("high-risk", "infra.change");
+  if (["kill", "pkill", "killall", "systemctl", "service", "launchctl", "shutdown", "reboot", "halt", "poweroff", "init", "telinit"].includes(lower)) {
+    const vals = args.map((a) => (a.value ?? "").toLowerCase());
+    const power = ["shutdown", "reboot", "halt", "poweroff"].includes(lower) || ((lower === "init" || lower === "telinit") && ["0", "6"].includes(vals[0] ?? ""));
+    const sysctlPower = lower === "systemctl" && vals.some((v) => ["poweroff", "reboot", "halt", "kexec", "suspend", "hibernate", "emergency", "rescue"].includes(v));
+    const stopsService = (lower === "systemctl" && vals.some((v) => ["stop", "disable", "mask", "kill"].includes(v))) || (lower === "service" && vals.includes("stop"));
+    if (power || sysctlPower) { acc.tag("high-risk", "infra.change"); acc.reason("powers off or restarts the machine"); }
+    else if (stopsService) { acc.tag("high-risk", "infra.change"); acc.reason("stops or disables a system service"); }
     else acc.tag("write-reversible", "exec.unknown");
+    return;
+  }
+  // Scheduled and timed jobs are persistence (CP-SELF-004), like crontab.
+  if ((lower === "systemd-run" && args.some((a) => /^--on-(calendar|active|boot|startup|unit-active|unit-inactive)/.test(a.value ?? ""))) ||
+      ((lower === "at" || lower === "batch") && args.length > 0 && !args.every((a) => ["-l", "-V"].includes(a.value ?? ""))) ||
+      (lower === "schtasks" && args.some((a) => /^[/-]create$/i.test(a.value ?? ""))) ||
+      (lower === "sc" && (args[0]?.value ?? "").toLowerCase() === "create")) {
+    acc.protect("CP-SELF-004", "schedules a job or installs a service that runs later");
+    return;
+  }
+  // Deleting backups, shadow copies or recovery settings: irreversible (ask).
+  if ((lower === "vssadmin" && args.some((a) => /^(delete|resize)$/i.test(a.value ?? ""))) || lower === "diskshadow" ||
+      (lower === "wbadmin" && args.some((a) => /^delete$/i.test(a.value ?? ""))) ||
+      (lower === "wmic" && args.some((a) => /^shadowcopy$/i.test(a.value ?? "")) && args.some((a) => /^delete$/i.test(a.value ?? ""))) ||
+      (lower === "bcdedit" && args.some((a) => /recoveryenabled|bootstatuspolicy/i.test(a.value ?? "")))) {
+    acc.tag("high-risk", "fs.destroy");
+    acc.reason("deletes backups, shadow copies or recovery settings");
     return;
   }
   acc.tag("write-reversible", "exec.unknown");
@@ -743,7 +800,45 @@ function remove(lower: string, args: WordInfo[], c: Ctx2): void {
     const isHome = p !== null && home !== null && (p === home || p === home + "/*");
     const star = raw === "*" || raw === "/*" || raw === "~/*" || raw === "$HOME/*" || raw === "." || raw === "./" || raw === ".." || raw === "./*";
     if ((recursive || raw.endsWith("*")) && (rootLevel || isHome || star || p === "/")) destroy(acc, "deletes a whole filesystem, home directory or project");
+    else if (recursive && isGitDir(p)) destroy(acc, "deletes a repository's .git directory, its whole history");
+    else if (recursive && homeTopLevel(p, pctx)) destroy(acc, "deletes a whole folder in the home directory");
+    if (lower === "shred" && p !== null && !scratch(p, c.st.pctx.cwd)) destroy(acc, "shreds files outside the project, which can't be recovered");
+    if (p !== null && isLogOrHistory(p)) acc.find("CP-ACTION-030", `${lower} on a log or shell history file`);
   }
+}
+
+/** scheme://…, file:… or scp-style user@host:path. String code, not a regex (ReDoS test). */
+function isRepoUrl(d: string): boolean {
+  const l = d.toLowerCase();
+  if (l.startsWith("file:")) return true;
+  const s = l.indexOf("://");
+  if (s > 0 && /^[a-z][a-z0-9+.-]*$/.test(l.slice(0, s))) return true;
+  const at = l.indexOf("@");
+  const colon = l.indexOf(":");
+  return at > 0 && colon > at + 1 && !l.slice(0, at).includes("/");
+}
+
+/** The .git directory of a repository, or everything in it. */
+function isGitDir(p: string | null): boolean {
+  if (p === null) return false;
+  const lp = trimEndChars(p, "/");
+  return lp === ".git" || lp.endsWith("/.git") || lp.endsWith("/.git/*");
+}
+
+/** Inside the session's project directory (not wherever a `cd` went) or a temp directory. */
+function scratch(p: string, cwd: string | null): boolean {
+  const lp = p.toLowerCase();
+  if (lp.startsWith("/tmp/") || lp.startsWith("/var/tmp/") || lp.startsWith("/private/tmp/")) return true;
+  if (cwd === null) return false;
+  const lc = trimEndChars(cwd.toLowerCase(), "/");
+  return lp.startsWith(lc + "/");
+}
+
+/** System logs and shell history files: clearing them hides what happened (warn, CP-ACTION-030). */
+function isLogOrHistory(p: string): boolean {
+  const lp = p.toLowerCase();
+  const base = lp.slice(lp.lastIndexOf("/") + 1);
+  return lp.startsWith("/var/log/") || base.endsWith("_history") || base === ".history" || base === "wtmp" || base === "btmp" || base === "lastlog";
 }
 
 const FIND_NARROWING = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-newer", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-size", "-user", "-group", "-perm", "-empty", "-links", "-inum", "-samefile", "-lname", "-ilname", "-maxdepth"]);
@@ -786,6 +881,35 @@ function find(args: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   // find loops forever on `while j < … && args[j] !== ";"` only if inner never ends; bounded by args length.
 }
 
+/** Is `p` inside `dir` (the session's project directory)? */
+function insideDir(p: string, dir: string | null, pctx: PathCtx): boolean {
+  if (dir === null) return false;
+  const fold = (s: string) => (pctx.caseInsensitive ? s.toLowerCase() : s);
+  const root = fold(trimEndChars(dir, "/"));
+  const lp = fold(p);
+  return lp === root || lp.startsWith(root + "/");
+}
+
+/** Why a chmod mode is risky (world-writable, setuid/setgid), or null. Unknown modes are risky. */
+function chmodRisk(mode: string): string | null {
+  if (/^[0-7]{3,4}$/.test(mode)) {
+    const d = mode.padStart(4, "0");
+    if ((Number(d[0]) & 6) !== 0) return "sets the setuid or setgid bit";
+    if ((Number(d[3]) & 2) !== 0) return "makes a file writable by everyone";
+    return null;
+  }
+  // Symbolic: comma-separated clauses like u+x, go-w, a=rwx.
+  for (const clause of mode.split(",")) {
+    const m = /^([ugoa]*)([-+=])([rwxXst]*)$/.exec(clause);
+    if (!m) return "uses a permission mode Glassbox can't read";
+    const who = m[1] ?? "", op = m[2] ?? "", perms = m[3] ?? "";
+    if (op === "-") continue;
+    if (perms.includes("s")) return "sets the setuid or setgid bit";
+    if (perms.includes("w") && (who.includes("o") || who.includes("a"))) return "makes a file writable by everyone";
+  }
+  return null;
+}
+
 function perm(lower: string, args: WordInfo[], c: Ctx2): void {
   const { acc, pctx } = c;
   const targets = operands(args);
@@ -793,16 +917,20 @@ function perm(lower: string, args: WordInfo[], c: Ctx2): void {
     const ops = operands(args);
     const mode = ops[0]?.value ?? "";
     const files = ops.slice(1);
-    const recursive = hasFlag(args, "-R", "--recursive");
-    const benign = /^(\+x|u\+x|a\+x|ug\+x|\+r|u\+rw|u\+r|go-w|o-w|g-w|-x|u\+rwx|755|744|700|644|640|600|0755|0644|0600|0700)$/.test(mode);
+    // Rev 8 (Q2): chmod asks only when recursive, outside the project, world-writable or
+    // setuid/setgid. Anything else is an ordinary, reversible change.
+    const recursive = hasFlag(args, "-R", "--recursive") || args.some((a) => /^-[a-zA-Z]*R/.test(a.value ?? ""));
+    let outside = false;
     for (const f of files) {
       const np = npOf(f, pctx);
       if (np === null) { acc.unanalyzable("changes permissions on a path that isn't known statically"); continue; }
       writeTarget(np, acc, pctx);
+      if (np.path === null || !insideDir(np.path, c.st.pctx.cwd, pctx)) outside = true;
     }
-    if (benign && !recursive) { acc.tag("write-reversible", "fs.write"); return; }
+    const risky = chmodRisk(mode);
+    if (!recursive && !outside && risky === null) { acc.tag("write-reversible", "fs.write"); return; }
     acc.tag("high-risk", "perm.change");
-    acc.reason("changes file permissions");
+    acc.reason(risky ?? (recursive ? "changes permissions recursively" : "changes permissions outside the project"));
     return;
   }
   for (const t of targets) {
@@ -815,37 +943,83 @@ function perm(lower: string, args: WordInfo[], c: Ctx2): void {
 
 function rsync(args: WordInfo[], c: Ctx2): void {
   const ops = operands(args, new Set(["-e", "--rsh", "--exclude", "--include", "--filter", "-f"]));
-  const remote = ops.some((o) => o.value === null || /^[^/]*:/.test(o.value) || (o.value ?? "").startsWith("rsync://"));
-  if (remote) { c.acc.tag("high-risk", "net.egress"); c.acc.network = true; }
+  const remotes = ops.filter((o) => remoteOperand(o.value));
+  const loop = remotes.length > 0 && allLoopback(remotes.map((o) => o.value));
+  if (remotes.length > 0 && !loop) { c.acc.tag("high-risk", "net.egress"); c.acc.network = true; }
+  // Local sources sent to a remote destination are uploads.
+  const last = ops[ops.length - 1];
+  if (last && remoteOperand(last.value)) for (const o of ops.slice(0, -1)) if (!remoteOperand(o.value)) uploadFile(o, c, loop);
   if (args.some((a) => a.value === "--delete" || (a.value ?? "").startsWith("--delete"))) c.acc.tag("high-risk", "fs.delete");
   const dest = ops[ops.length - 1];
   if (dest) writeOps([dest], c, "fs.write");
 }
 
+/** Is this remote operand (scp/rsync) on another host? host:path, user@host:path, rsync://. */
+function remoteOperand(v: string | null): boolean {
+  if (v === null) return true;
+  if (v.startsWith("rsync://")) return true;
+  const colon = v.indexOf(":");
+  const slash = v.indexOf("/");
+  return colon > 0 && (slash < 0 || colon < slash) && !/^[A-Za-z]:$/.test(v.slice(0, 2));
+}
+
+function uploadFile(file: WordInfo | string, c: Ctx2, loop: boolean): void {
+  if (loop) return;
+  const np = typeof file === "string" ? normalizePath(file, c.pctx) : npOf(file, c.pctx);
+  const label = typeof file === "string" ? file : (file.pathValue ?? file.suffix ?? "?");
+  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd), label.slice(0, 80));
+}
+
 function network(lower: string, args: WordInfo[], c: Ctx2): void {
   const { acc, pctx } = c;
-  acc.tag("high-risk", "net.egress");
-  acc.network = true;
+  // Every destination on this machine (curl http://localhost:3000, scp x localhost:) isn't egress.
+  let dests: (string | null)[] = [];
+  if (lower === "curl" || lower === "wget" || lower === "http" || lower === "https") {
+    dests = args.filter((a) => a.value === null || (a.value.includes("://") && !a.value.startsWith("-"))).map((a) => a.value);
+    const bare = operands(args, new Set(["-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "--json", "-T", "--upload-file", "-F", "--form", "-o", "--output", "-O", "-H", "--header", "-u", "--user", "-X", "--request", "-A", "--user-agent", "-e", "--referer", "-b", "--cookie", "-c", "--cookie-jar", "-x", "--proxy", "--post-file", "--body-file", "--post-data", "--header"]));
+    for (const o of bare) if (o.value !== null && !o.value.includes("://") && /^(localhost|127\.|\[::1\])/i.test(o.value)) dests.push(o.value);
+  } else if (lower === "scp" || lower === "sftp") {
+    dests = operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"])).filter((o) => remoteOperand(o.value)).map((o) => o.value);
+  }
+  const loop = allLoopback(dests);
+  if (loop) { acc.reason("talks only to this machine (loopback)"); }
+  else { acc.tag("high-risk", "net.egress"); acc.network = true; }
   if (lower === "curl" || lower === "wget" || lower === "http" || lower === "https") {
     for (let i = 0; i < args.length; i++) {
-      const v = args[i]?.value ?? "";
-      const next = args[i + 1];
-      const takesFile = ["-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "-T", "--upload-file", "-F", "--form", "--post-file", "--body-file"];
-      if (takesFile.includes(v) && next) {
-        const nv = next.pathValue ?? "";
-        const file = v === "-T" || v === "--upload-file" || v === "--post-file" || v === "--body-file" ? nv : nv.includes("@") ? nv.slice(nv.indexOf("@") + 1).split(";")[0] ?? "" : "";
-        if (file && file !== "-") readTarget(normalizePath(file, pctx), acc, pctx, false);
-        if (next.substs.length > 0) acc.sensitiveArgs ||= false;
+      const v0 = args[i]?.value ?? "";
+      // wget accepts --opt=value; curl takes the value as the next word.
+      const eq = v0.startsWith("--") ? v0.indexOf("=") : -1;
+      const v = eq > 0 ? v0.slice(0, eq) : v0;
+      const next = eq > 0 ? ({ ...(args[i] as WordInfo), value: v0.slice(eq + 1), pathValue: v0.slice(eq + 1) } as WordInfo) : args[i + 1];
+      if (!next) continue;
+      const nv = next.value;
+      let file: string | null | undefined;
+      if (v === "-T" || v === "--upload-file" || v === "--post-file" || v === "--body-file") file = next.value === null ? null : next.pathValue ?? "";
+      else if (v === "-d" || v === "--data" || v === "--data-binary" || v === "--json") file = nv === null ? undefined : nv.startsWith("@") ? nv.slice(1) : undefined;
+      else if (v === "--data-urlencode") { if (nv !== null) { const at = nv.indexOf("@"); const eqi = nv.indexOf("="); if (at >= 0 && (eqi < 0 || at < eqi)) file = nv.slice(at + 1); } }
+      else if (v === "-F" || v === "--form") {
+        if (nv === null) file = null;
+        else { const e = nv.indexOf("="); const rest = e >= 0 ? nv.slice(e + 1) : ""; if (rest.startsWith("@") || rest.startsWith("<")) file = (rest.slice(1).split(";")[0] ?? ""); }
       }
-      if ((v === "-o" || v === "--output" || v === "-O" && lower === "wget") && next) {
-        const np = npOf(next, pctx);
+      if (file === null) { if (!loop) recordUpload(acc, "outside", "a file named at run time"); }
+      else if (file !== undefined && file !== "" && file !== "-") {
+        readTarget(normalizePath(file, pctx), acc, pctx, false);
+        uploadFile(file, c, loop);
+      }
+      if ((v === "-o" || v === "--output" || (v === "-O" && lower === "wget")) && args[i + 1]) {
+        const np = npOf(args[i + 1] as WordInfo, pctx);
         if (np) writeTarget(np, acc, pctx);
       }
     }
   }
   if (lower === "scp" || lower === "sftp") {
-    for (const o of operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"]))) {
-      if (o.value !== null && !/^[^/]*:/.test(o.value)) readTarget(normalizePath(o.value, pctx), acc, pctx, true);
+    const ops = operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"]));
+    const last = ops[ops.length - 1];
+    const toRemote = last !== undefined && remoteOperand(last.value);
+    for (const o of ops.slice(0, -1)) {
+      if (o.value !== null && remoteOperand(o.value)) continue; // a remote source: a download
+      if (o.value !== null) readTarget(normalizePath(o.value, pctx), acc, pctx, true);
+      if (toRemote) uploadFile(o, c, loop);
     }
   }
   if (lower === "ssh") {
@@ -859,10 +1033,41 @@ function docker(args: WordInfo[], c: Ctx2): void {
   const sub = operands(args, new Set(["-H", "--host", "--context", "-c", "--config", "-l", "--log-level"]))[0]?.value ?? "";
   if (["pull", "login", "search"].includes(sub)) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }
   if (sub === "push") { acc.tag("high-risk", "publish.public", "net.egress"); acc.network = true; return; }
+  const vals = args.map((a) => a.value ?? "");
+  if ((sub === "system" && vals.includes("prune")) || (sub === "volume" && (vals.includes("prune") || vals.includes("rm")))) {
+    acc.tag("high-risk", "fs.destroy", "fs.delete");
+    acc.reason("deletes Docker volumes or all unused data, which can't be recovered");
+    return;
+  }
   if (["rm", "rmi", "prune", "kill"].includes(sub) || args.some((a) => a.value === "prune")) { acc.tag("high-risk", "fs.delete"); return; }
   if (["ps", "images", "inspect", "logs", "version", "info", "stats", "top", "history", "port", "diff"].includes(sub)) return;
   if (sub === "run" && args.some((a) => a.value === "--privileged" || (a.value ?? "").startsWith("-v=/:") || a.value === "-v" )) acc.reason("runs a container with host access");
   acc.tag("write-reversible", "exec.unknown");
+}
+
+/** aws s3 rm --recursive, aws s3 rb --force, gcloud storage rm -r, gsutil rm -r. */
+function cloudBulkDelete(lower: string, vals: string[]): boolean {
+  const recursive = vals.includes("--recursive") || vals.includes("-r") || vals.includes("-R");
+  if (lower === "aws") return vals.includes("s3") && ((vals.includes("rm") && recursive) || (vals.includes("rb") && vals.includes("--force")));
+  if (lower === "gcloud") return vals.includes("storage") && vals.includes("rm") && recursive;
+  if (lower === "gsutil") return vals.includes("rm") && recursive;
+  return false;
+}
+
+/** --context naming a local cluster (kind, minikube, Docker Desktop…) or --server on loopback. */
+function localKubeContext(args: WordInfo[]): boolean {
+  const vals = args.map((a) => a.value ?? "");
+  const valueOf = (flag: string) => {
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] === flag) return vals[i + 1] ?? "";
+      if ((vals[i] ?? "").startsWith(flag + "=")) return (vals[i] ?? "").slice(flag.length + 1);
+    }
+    return null;
+  };
+  const ctxName = (valueOf("--context") ?? "").toLowerCase();
+  if (/^(kind|minikube|docker-desktop|docker-for-desktop|rancher-desktop|orbstack|colima|microk8s|k3d-.+|kind-.+)$/.test(ctxName)) return true;
+  const server = valueOf("--server") ?? valueOf("-s");
+  return server !== null && allLoopback([server]);
 }
 
 function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
@@ -871,6 +1076,21 @@ function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
   const vals = args.map((a) => a.value ?? "");
   const sub = operands(args, new Set(["-n", "--namespace", "--context", "--kubeconfig", "--project", "--region", "--profile", "-c", "-f", "--chdir", "-o", "--output"]))[0]?.value ?? "";
   const readSubs = new Set(["get", "describe", "logs", "list", "ls", "show", "status", "plan", "validate", "fmt", "version", "init", "whoami", "config", "top", "explain", "diff", "history", "output", "preview", "info", "inspect", "help", "--version", "-v", "dev", "login"]);
+  if (cloudBulkDelete(lower, vals)) {
+    acc.tag("high-risk", "fs.destroy", "net.egress");
+    acc.reason("deletes cloud storage objects in bulk, which can't be recovered");
+    return;
+  }
+  if (lower === "kubectl") {
+    // Rev 8 (Q2): label/annotate warn; delete/apply/scale ask unless the context is local.
+    if (sub === "label" || sub === "annotate") { acc.tag("high-risk", "net.egress"); acc.reason(`kubectl ${sub} changes object metadata`); return; }
+    if (sub === "delete" || sub === "apply" || sub === "scale") {
+      if (localKubeContext(args)) { acc.tag("high-risk", "net.egress"); acc.reason(`kubectl ${sub} on a local cluster`); return; }
+      acc.tag("high-risk", "infra.change", "net.egress");
+      acc.reason(`kubectl ${sub} on a cluster that isn't known to be local`);
+      return;
+    }
+  }
   if (lower === "vercel") {
     if (vals.includes("--prod") || vals.includes("--production") || sub === "promote") { acc.tag("high-risk", "deploy.prod", "net.egress"); return; }
     if (["ls", "list", "inspect", "logs", "whoami", "env", "pull", "dev", "build", "link"].includes(sub)) { acc.tag("high-risk", "net.egress"); return; }
@@ -943,6 +1163,10 @@ function git(args: WordInfo[], c: Ctx2): void {
       return;
     }
     case "remote": {
+      if ((rv[0] === "add" || rv[0] === "set-url") && rv.length >= 3) {
+        const name = operands(rest.slice(1), new Set(["-t", "-m", "--track", "--master"]))[0]?.value ?? null;
+        acc.newRemotes.push(name ?? "\u0000dynamic");
+      }
       if (["add", "remove", "rm", "rename", "set-url", "set-head", "prune"].includes(rv[0] ?? "")) { commit(); return; }
       if (rv[0] === "update") net("net.fetch.vcs");
       return;
@@ -1019,6 +1243,14 @@ function git(args: WordInfo[], c: Ctx2): void {
       const refspecs = operands(rest, new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"])).slice(1);
       const plusOrColon = refspecs.some((r) => r.value === null || r.value.startsWith("+") || r.value.startsWith(":"));
       if (force || plusOrColon) { acc.tags.add("vcs.force-push"); acc.reason("force-pushes or deletes remote history"); }
+      const target = operands(rest, new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]))[0];
+      const repoOpt = rest.find((a) => (a.value ?? "").startsWith("--repo="))?.value?.slice(7);
+      const dest = repoOpt ?? (target ? target.value : undefined);
+      if (dest === null) acc.pushedTo.push("\u0000dynamic");
+      else if (dest !== undefined) {
+        if (isRepoUrl(dest)) acc.find("CP-EXFIL-034", "pushes straight to a repository URL instead of a configured remote");
+        else acc.pushedTo.push(dest);
+      }
       return;
     }
     case "pull": case "fetch": case "clone": case "ls-remote": case "submodule":

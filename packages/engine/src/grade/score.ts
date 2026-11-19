@@ -9,6 +9,14 @@ const WEIGHT: Partial<Record<Category, number>> = {
 };
 const CATEGORY_CAP: Partial<Record<Category, number>> = { "resource-limit": 30, "capability-mismatch": 30, hygiene: 10 };
 const SEV: Severity[] = ["info", "low", "medium", "high", "critical"];
+const NEVER_A: ReadonlySet<Category> = new Set<Category>(["tool-poisoning", "shadowing"]);
+/** Name collisions and spoofed names: CP-SHADOW-010 (also shadowing) and CP-HIDDEN-004 (mixed-script names). */
+const NEVER_A_RULES: ReadonlySet<string> = new Set(["CP-SHADOW-010", "CP-HIDDEN-004"]);
+/**
+ * CP-SPOOF-001 ("official", "endorsed by") is filed under tool-poisoning but is a claim, not a
+ * spoofed name or an instruction, and fires on benign text such as "Official SDK client.".
+ */
+const NEVER_A_EXCEPT: ReadonlySet<string> = new Set(["CP-SPOOF-001"]);
 const GRADES: Grade[] = ["A", "B", "C", "D", "F"];
 const worse = (a: Grade, b: Grade): Grade => (GRADES.indexOf(a) >= GRADES.indexOf(b) ? a : b);
 
@@ -61,12 +69,18 @@ export function scoreFindings(findings: readonly Finding[], opts: { partial: boo
   let grade = letter(score);
   const caps: Score["caps"] = [];
   const confident = findings.filter((f) => f.confidence >= 0.3 && (WEIGHT[f.category] ?? 1) > 0);
+  // The worst finding caps the grade (grading rev 7): critical → F, high → D, medium → C.
   const crit = confident.filter((f) => f.severity === "critical");
   if (crit.length) caps.push({ cap: "F", reason: "Capped at F: a critical finding was found in the metadata.", findingIds: crit.map((f) => f.id) });
   const hidden = confident.filter((f) => f.category === "hidden-content" && SEV.indexOf(f.severity) >= 2);
   if (hidden.length) caps.push({ cap: "D", reason: "Capped at D: hidden content of medium severity or higher was found in the metadata.", findingIds: hidden.map((f) => f.id) });
   const high = confident.filter((f) => f.severity === "high");
-  if (high.length) caps.push({ cap: "C", reason: "Capped at C: a high-severity finding was found in the metadata.", findingIds: high.map((f) => f.id) });
+  if (high.length) caps.push({ cap: "D", reason: "Capped at D: a high-severity finding was found in the metadata.", findingIds: high.map((f) => f.id) });
+  const medium = confident.filter((f) => f.severity === "medium");
+  if (medium.length) caps.push({ cap: "C", reason: "Capped at C: a medium-severity finding was found in the metadata.", findingIds: medium.map((f) => f.id) });
+  // Poisoning, shadowing, name collisions and spoofed names never get an A, whatever their severity.
+  const never = confident.filter((f) => (NEVER_A.has(f.category) && !NEVER_A_EXCEPT.has(f.ruleId)) || NEVER_A_RULES.has(f.ruleId));
+  if (never.length) caps.push({ cap: "B", reason: "Capped at B: the metadata shows tool poisoning, shadowing, a name collision or a spoofed name.", findingIds: never.map((f) => f.id) });
   if (opts.partial) caps.push({ cap: "B", reason: "Capped at B: the scan hit a limit, so part of the metadata wasn't analyzed.", findingIds: [] });
   for (const c of caps) grade = worse(grade, c.cap);
   return {

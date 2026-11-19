@@ -4,7 +4,9 @@
 import { describe, expect, it } from "vitest";
 import { EMBEDDED_BASELINE, type LoadedRuleset, type Matcher, type RuleDef } from "../../src/index.js";
 import { BASELINE_TEST_CASES, runRuleSelfTests } from "../../src/ruleset-entry.js";
+import * as v from "valibot";
 import { validateRules } from "../../src/ruleset/load.js";
+import { RuleSchema } from "../../src/ruleset/schema.js";
 import { anchorsCover, requiredLiterals } from "./regex-literals.js";
 
 type Regex = Extract<Matcher, { type: "regex" }>;
@@ -66,6 +68,13 @@ describe("baseline regex rules", () => {
     // one deliberate exception (markdown image syntax).
     const weak = (m.anchors ?? []).filter((a) => a.length < 3 && [...a].every((c) => c >= " " && c <= "~") && a !== "![");
     expect(weak).toEqual([]);
+  });
+
+  it("every baseline rule passes the signed-payload rule schema (the build doesn't check it)", () => {
+    // Found while splitting CP-POISON-003: an "any" without scope "field" built and passed every
+    // rule self-test, but a signed ruleset containing it fell back to the embedded baseline.
+    const bad = EMBEDDED_BASELINE.rules.filter((r) => !v.safeParse(RuleSchema, r).success).map((r) => r.id);
+    expect(bad).toEqual([]);
   });
 
   it("the loader accepts the baseline anchors", () => {

@@ -186,10 +186,29 @@ function matchPhrases(text: string, phrases: string[][], gap: number, memo?: Fie
   return null;
 }
 
-function matchTokens(toks: Token[], phrases: string[][], gap: number): Hit | null {
-  for (let i = 0; i < toks.length; i++) {
+/** Phrases grouped by first word, built once per phrase list (cost per token is one lookup). */
+const BY_FIRST = new WeakMap<string[][], Map<string, string[][]>>();
+function byFirst(phrases: string[][]): Map<string, string[][]> {
+  let m = BY_FIRST.get(phrases);
+  if (m === undefined) {
+    m = new Map();
     for (const ph of phrases) {
-      if (ph.length === 0 || toks[i]?.w !== ph[0]) continue;
+      const f = ph[0];
+      if (f === undefined) continue;
+      const list = m.get(f);
+      if (list) list.push(ph); else m.set(f, [ph]);
+    }
+    BY_FIRST.set(phrases, m);
+  }
+  return m;
+}
+
+function matchTokens(toks: Token[], phrases: string[][], gap: number): Hit | null {
+  const index = byFirst(phrases);
+  for (let i = 0; i < toks.length; i++) {
+    const cands = index.get(toks[i]?.w ?? "");
+    if (cands === undefined) continue;
+    for (const ph of cands) {
       let j = i, k = 1;
       while (k < ph.length) {
         let found = -1;

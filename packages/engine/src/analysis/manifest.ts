@@ -6,7 +6,7 @@ import { scoreFindings } from "../grade/score.js";
 import { resolveLimits } from "../limits.js";
 import { EMBEDDED_BASELINE } from "../ruleset/baseline.js";
 import type { ActionRisk, AnalyzeOptions, Finding, LoadedRuleset, RuleDef, ServerReport, ToolDef } from "../types.js";
-import { get, getString, isRecord, utf8Length } from "../util/misc.js";
+import { get, getString, isRecord, trimEndChars, utf8Length } from "../util/misc.js";
 import { ENGINE_VERSION } from "../version.js";
 import { manifestFields, type Field } from "./fields.js";
 import { dedupe, FindingFactory, sortFindings } from "./findings.js";
@@ -16,6 +16,59 @@ import { scanFields } from "./scan.js";
 
 const BUILTIN_TOOL_NAMES = ["Bash", "PowerShell", "Write", "Edit", "MultiEdit", "Read", "WebFetch", "WebSearch", "Grep", "Glob", "Agent", "Task", "NotebookEdit"];
 const DIRECTIVE_WORDS = new Set(["instead", "always", "before", "after", "deprecated", "must", "never", "don't", "dont", "should", "replace", "override", "first"]);
+const STRONG_DIRECTIVES = new Set(["must", "always", "before", "instead", "first", "mandatory", "required", "never", "redirect", "redirected", "priority", "replace", "prior", "should", "change", "modify", "override", "rewrite", "append"]);
+const SOFT_DIRECTIVES = new Set(["instead", "should", "replace"]);
+const TOOL_LEAD = new Set(["using", "use", "call", "calling", "run", "running", "invoke", "invoking", "tool"]);
+const CAMEL = /^[a-z]+(?:[A-Z][a-z0-9]*)+$/;
+const IDENT = /^[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+$/;
+
+/** Tool-shaped names inside backticks or quotes: `send_email`, 'read_file', "map-traffic", 'sendSimpleMail'. */
+function quotedIdentifiers(text: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length && out.length < 20; i++) {
+    const q = text[i];
+    if (q !== "`" && q !== "'" && q !== '"') continue;
+    const end = text.indexOf(q as string, i + 1);
+    if (end < 0) break;
+    if (end - i - 1 <= 64) {
+      const inner = text.slice(i + 1, end);
+      // camelCase in quotes is usually a field name ('endCursor'); it counts only when led (ledIdentifiers).
+      if (IDENT.test(inner)) out.push(inner);
+    }
+    i = end;
+  }
+  return out;
+}
+
+/** Tool-shaped names right after "using", "call", "run"…, quoted or not (Before using search_files, call write_file; use 'sendSimpleMail'). */
+function ledIdentifiers(text: string): string[] {
+  const words = text.slice(0, 20_000).split(/\s+/);
+  const out: string[] = [];
+  for (let i = 1; i < words.length && out.length < 20; i++) {
+    const prev = (words[i - 1] ?? "").toLowerCase();
+    const prev2 = (words[i - 2] ?? "").toLowerCase();
+    // "use X" or "use the X tool" ("use the 'endCursor' from…" names a field, not a tool).
+    const viaThe = prev === "the" && TOOL_LEAD.has(prev2) && (words[i + 1] ?? "").toLowerCase().startsWith("tool");
+    if (!TOOL_LEAD.has(prev) && !viaThe) continue;
+    const w = trimEndChars((words[i] ?? "").replace(/^[(`'"]+/, ""), ".,;:)!?`'\"");
+    if (w.length <= 64 && (IDENT.test(w) || CAMEL.test(w))) out.push(w);
+  }
+  return out;
+}
+
+/** Every property name and string value in a schema (bounded). */
+function schemaStrings(schema: unknown): string[] {
+  const out: string[] = [];
+  const stack: unknown[] = [schema];
+  while (stack.length > 0 && out.length < 2000) {
+    const v = stack.pop();
+    if (typeof v === "string") out.push(v);
+    else if (Array.isArray(v)) stack.push(...v.slice(0, 200));
+    else if (isRecord(v)) for (const k of Object.keys(v).slice(0, 200)) { out.push(k); stack.push(v[k]); }
+  }
+  return out;
+}
+
 const PURPOSE_HARMLESS = new Set(["time", "date", "clock", "timezone", "math", "calculate", "calculator", "add", "sum", "multiply", "convert", "format", "weather", "forecast", "random", "uuid", "echo", "ping", "joke", "quote", "temperature", "unit", "units", "color", "colour"]);
 const CAP_PARAMS: [RegExp, string][] = [
   [/^(command|cmd|shell|script|code|exec|eval|bash|powershell)$/i, "exec"],
@@ -51,6 +104,12 @@ function toolStrings(tool: unknown, base: string): { pointer: string; text: stri
   }
   return out;
 }
+
+/** Widely used MCP server names that are worth imitating; known servers from the caller are added. */
+const WELL_KNOWN_SERVERS = [
+  "github", "gitlab", "slack", "gmail", "google", "googledrive", "filesystem", "notion", "linear", "jira", "atlassian",
+  "stripe", "aws", "postgres", "sentry", "figma", "anthropic", "openai", "microsoft", "azure", "cloudflare", "vercel",
+];
 
 export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | undefined, t0: number): ServerReport {
   const limits = resolveLimits(opts?.limits);
@@ -123,7 +182,9 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
 
     // Capability mismatch: a harmless-sounding purpose asking for powerful inputs.
     const purpose = [...nameWords(name), ...nameWords((desc ?? "").split(/[.\n]/)[0] ?? "").slice(0, 6)];
-    const harmless = purpose.some((w) => PURPOSE_HARMLESS.has(w)) && prof.acc.level !== "high-risk";
+    // Only short names state a single harmless purpose (get_time, add_numbers); in a longer name
+    // (add_pull_request_review_comment) the word is a verb about something else.
+    const harmless = nameWords(name).length <= 2 && purpose.some((w) => PURPOSE_HARMLESS.has(w)) && prof.acc.level !== "high-risk";
     const props = get(get(t, "inputSchema"), "properties");
     if (harmless && isRecord(props)) {
       for (const k of Object.keys(props)) {
@@ -171,6 +232,22 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
       if (hit) { findings.push(ff.make({ ruleId: "CP-SHADOW-001", location: s.pointer, text: s.text, start: s.text.indexOf(hit), end: s.text.indexOf(hit) + hit.length })); break; }
     }
 
+    // Directives about a tool named in quotes that isn't this tool (rev 7, from MCPTox): works
+    // without knowing the other server. Names and values from the tool's own schema don't count.
+    if (!findings.some((f) => f?.ruleId === "CP-SHADOW-001" && f.location.startsWith(base))) {
+      // Tools on this same server are its own business (a real scan grades the whole server).
+      const own = new Set<string>([...[...ownNames].map((x) => x.toLowerCase()), ...schemaStrings(get(t, "inputSchema")).map((x) => x.toLowerCase())]);
+      for (const s of strs) {
+        const text = s.text.slice(0, limits.maxFieldScanBytes);
+        const lowerWords = new Set(tokenize(text).map((w) => w.w.toLowerCase()));
+        if (![...STRONG_DIRECTIVES].some((d) => lowerWords.has(d))) continue;
+        // Unquoted names need a demand, not a recommendation ("use stream_file instead" is fine).
+        const demands = [...STRONG_DIRECTIVES].some((d) => !SOFT_DIRECTIVES.has(d) && lowerWords.has(d));
+        const ref = [...quotedIdentifiers(text), ...(demands ? ledIdentifiers(text) : [])].find((q) => !own.has(q.toLowerCase()));
+        if (ref) { findings.push(ff.make({ ruleId: "CP-SHADOW-002", location: s.pointer, text, start: text.indexOf(ref), end: text.indexOf(ref) + ref.length })); break; }
+      }
+    }
+
     // Collisions and typosquats against other servers' tools.
     for (const k of known) {
       if (k.name === name) { findings.push(ff.make({ ruleId: "CP-SHADOW-010", location: `${base}/name`, text: name })); break; }
@@ -181,6 +258,21 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
       }
     }
   });
+
+  // Spoofed server names (rev 7): a name that isn't a known server's name but looks the same once
+  // look-alike letters are folded (ɡithub, gіthub, fiIesystem). Case alone (GitHub) doesn't count.
+  // Both sides are folded: the skeleton itself maps m → rn, and I and l only meet after lowercasing.
+  const fold = (s: string) => buildViews(s).skeleton.text.replace(/[i1|]/g, "l").replace(/0/g, "o");
+  const knownNames = [...new Set([...WELL_KNOWN_SERVERS, ...known.map((k) => (typeof k.serverId === "string" ? k.serverId.toLowerCase() : "")).filter(Boolean)])];
+  const knownFolded = new Set(knownNames.map(fold));
+  const info = get(get(m, "initialize"), "serverInfo");
+  for (const [ptr, n] of [["/initialize/serverInfo/name", getString(info, "name")], ["/serverId", getString(m, "serverId")]] as const) {
+    if (n === undefined || n.length > 200) continue;
+    if (!knownNames.includes(n.toLowerCase()) && knownFolded.has(fold(n))) {
+      findings.push(ff.make({ ruleId: "CP-SHADOW-011", location: ptr, text: n }));
+      break;
+    }
+  }
 
   // Split payloads across tools (red team, Step 5): every tool's description, in order.
   const descs = tools.map((t, i) => ({ pointer: `/tools/${i}/description`, text: getString(t, "description") ?? "" })).filter((d) => d.text.length > 0);

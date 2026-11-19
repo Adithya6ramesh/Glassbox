@@ -1,7 +1,25 @@
 {
   "name": "@glassbox/engine",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Glassbox security engine: pure, deterministic analysis of MCP metadata and agent tool calls.",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "security",
+    "prompt-injection",
+    "tool-poisoning",
+    "claude-code"
+  ],
+  "homepage": "https://github.com/Adithya6ramesh/Glassbox#readme",
+  "bugs": {
+    "url": "https://github.com/Adithya6ramesh/Glassbox/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Adithya6ramesh/Glassbox.git",
+    "directory": "packages/engine"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -16,7 +34,10 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.map",
+    "!dist/**/*.tsbuildinfo",
+    "!dist/tsconfig.tsbuildinfo"
   ],
   "engines": {
     "node": ">=24.11.0"
@@ -30,5 +51,8 @@
     "@noble/hashes": "2.4.0",
     "re2js": "2.9.1",
     "valibot": "1.5.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -29,7 +29,9 @@ describe("no committed secrets", () => {
       }
     }
     expect(hits).toEqual([]);
-  });
+    // Scans every tracked file, including 1.6 MB of benchmark data: under the stress job's
+    // parallel load this passed the 5 s default. The check itself is unchanged.
+  }, 120_000);
 
   it("docs/ is not tracked (kept out of the public repo)", () => {
     let files: string[];
