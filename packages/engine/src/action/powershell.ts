@@ -4,6 +4,7 @@ import { Acc } from "./acc.js";
 import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
+import { allLoopback, classifyUpload, recordUpload } from "./upload.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
 
 class PsUnanalyzable extends Error {
@@ -501,7 +502,29 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     }
     return;
   }
-  if (NETWORK.has(cmdlet)) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }
+  if (NETWORK.has(cmdlet)) {
+    const dest = paramValue(el, "-Uri") ?? paramValue(el, "-SmtpServer") ?? (cmdlet === "send-mailmessage" ? null : positional(el)[0] ?? null);
+    const loop = allLoopback(dest ? [tokText(dest).value] : []);
+    if (!loop) { acc.tag("high-risk", "net.egress"); acc.network = true; }
+    // Uploads: -InFile, and -Attachments (comma-separated).
+    const files: (string | null)[] = [];
+    const inFile = paramValue(el, "-InFile");
+    if (inFile) files.push(tokText(inFile).pathValue);
+    const att = paramValue(el, "-Attachments");
+    if (att) { const v = tokText(att).pathValue; if (v === null) files.push(null); else files.push(...v.split(",").map((x) => x.trim()).filter(Boolean)); }
+    if (cmdlet === "send-mailmessage") {
+      // Further positional words after -Attachments a, b are more attachments.
+      const i = el.findIndex((t) => t.k === "param" && t.v.toLowerCase() === "-attachments");
+      for (let k = i + 2; i >= 0 && k < el.length && el[k]?.k !== "param"; k++) { const t = tokText(el[k]); if (t.pathValue !== null && t.pathValue !== ",") files.push(t.pathValue.replace(/^,|,$/g, "")); }
+    }
+    if (!loop) {
+      for (const f of files) {
+        const p = f === null ? null : np({ k: "word", v: f, dyn: false } as Tok, pctx);
+        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd), f ?? "a file named at run time");
+      }
+    }
+    return;
+  }
   if (PERM.has(cmdlet)) { acc.tag("high-risk", "perm.change"); return; }
   if (cmdlet === "new-object") {
     if (el.some((t) => (t.k === "word" || t.k === "str") && /net\.(webclient|sockets)|system\.net/i.test(t.v))) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }

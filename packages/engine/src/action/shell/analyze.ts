@@ -1,5 +1,6 @@
 // Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
 import { Acc } from "../acc.js";
+import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
@@ -880,6 +881,35 @@ function find(args: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   // find loops forever on `while j < … && args[j] !== ";"` only if inner never ends; bounded by args length.
 }
 
+/** Is `p` inside `dir` (the session's project directory)? */
+function insideDir(p: string, dir: string | null, pctx: PathCtx): boolean {
+  if (dir === null) return false;
+  const fold = (s: string) => (pctx.caseInsensitive ? s.toLowerCase() : s);
+  const root = fold(trimEndChars(dir, "/"));
+  const lp = fold(p);
+  return lp === root || lp.startsWith(root + "/");
+}
+
+/** Why a chmod mode is risky (world-writable, setuid/setgid), or null. Unknown modes are risky. */
+function chmodRisk(mode: string): string | null {
+  if (/^[0-7]{3,4}$/.test(mode)) {
+    const d = mode.padStart(4, "0");
+    if ((Number(d[0]) & 6) !== 0) return "sets the setuid or setgid bit";
+    if ((Number(d[3]) & 2) !== 0) return "makes a file writable by everyone";
+    return null;
+  }
+  // Symbolic: comma-separated clauses like u+x, go-w, a=rwx.
+  for (const clause of mode.split(",")) {
+    const m = /^([ugoa]*)([-+=])([rwxXst]*)$/.exec(clause);
+    if (!m) return "uses a permission mode Glassbox can't read";
+    const who = m[1] ?? "", op = m[2] ?? "", perms = m[3] ?? "";
+    if (op === "-") continue;
+    if (perms.includes("s")) return "sets the setuid or setgid bit";
+    if (perms.includes("w") && (who.includes("o") || who.includes("a"))) return "makes a file writable by everyone";
+  }
+  return null;
+}
+
 function perm(lower: string, args: WordInfo[], c: Ctx2): void {
   const { acc, pctx } = c;
   const targets = operands(args);
@@ -887,16 +917,20 @@ function perm(lower: string, args: WordInfo[], c: Ctx2): void {
     const ops = operands(args);
     const mode = ops[0]?.value ?? "";
     const files = ops.slice(1);
-    const recursive = hasFlag(args, "-R", "--recursive");
-    const benign = /^(\+x|u\+x|a\+x|ug\+x|\+r|u\+rw|u\+r|go-w|o-w|g-w|-x|u\+rwx|755|744|700|644|640|600|0755|0644|0600|0700)$/.test(mode);
+    // Rev 8 (Q2): chmod asks only when recursive, outside the project, world-writable or
+    // setuid/setgid. Anything else is an ordinary, reversible change.
+    const recursive = hasFlag(args, "-R", "--recursive") || args.some((a) => /^-[a-zA-Z]*R/.test(a.value ?? ""));
+    let outside = false;
     for (const f of files) {
       const np = npOf(f, pctx);
       if (np === null) { acc.unanalyzable("changes permissions on a path that isn't known statically"); continue; }
       writeTarget(np, acc, pctx);
+      if (np.path === null || !insideDir(np.path, c.st.pctx.cwd, pctx)) outside = true;
     }
-    if (benign && !recursive) { acc.tag("write-reversible", "fs.write"); return; }
+    const risky = chmodRisk(mode);
+    if (!recursive && !outside && risky === null) { acc.tag("write-reversible", "fs.write"); return; }
     acc.tag("high-risk", "perm.change");
-    acc.reason("changes file permissions");
+    acc.reason(risky ?? (recursive ? "changes permissions recursively" : "changes permissions outside the project"));
     return;
   }
   for (const t of targets) {
@@ -909,37 +943,83 @@ function perm(lower: string, args: WordInfo[], c: Ctx2): void {
 
 function rsync(args: WordInfo[], c: Ctx2): void {
   const ops = operands(args, new Set(["-e", "--rsh", "--exclude", "--include", "--filter", "-f"]));
-  const remote = ops.some((o) => o.value === null || /^[^/]*:/.test(o.value) || (o.value ?? "").startsWith("rsync://"));
-  if (remote) { c.acc.tag("high-risk", "net.egress"); c.acc.network = true; }
+  const remotes = ops.filter((o) => remoteOperand(o.value));
+  const loop = remotes.length > 0 && allLoopback(remotes.map((o) => o.value));
+  if (remotes.length > 0 && !loop) { c.acc.tag("high-risk", "net.egress"); c.acc.network = true; }
+  // Local sources sent to a remote destination are uploads.
+  const last = ops[ops.length - 1];
+  if (last && remoteOperand(last.value)) for (const o of ops.slice(0, -1)) if (!remoteOperand(o.value)) uploadFile(o, c, loop);
   if (args.some((a) => a.value === "--delete" || (a.value ?? "").startsWith("--delete"))) c.acc.tag("high-risk", "fs.delete");
   const dest = ops[ops.length - 1];
   if (dest) writeOps([dest], c, "fs.write");
 }
 
+/** Is this remote operand (scp/rsync) on another host? host:path, user@host:path, rsync://. */
+function remoteOperand(v: string | null): boolean {
+  if (v === null) return true;
+  if (v.startsWith("rsync://")) return true;
+  const colon = v.indexOf(":");
+  const slash = v.indexOf("/");
+  return colon > 0 && (slash < 0 || colon < slash) && !/^[A-Za-z]:$/.test(v.slice(0, 2));
+}
+
+function uploadFile(file: WordInfo | string, c: Ctx2, loop: boolean): void {
+  if (loop) return;
+  const np = typeof file === "string" ? normalizePath(file, c.pctx) : npOf(file, c.pctx);
+  const label = typeof file === "string" ? file : (file.pathValue ?? file.suffix ?? "?");
+  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd), label.slice(0, 80));
+}
+
 function network(lower: string, args: WordInfo[], c: Ctx2): void {
   const { acc, pctx } = c;
-  acc.tag("high-risk", "net.egress");
-  acc.network = true;
+  // Every destination on this machine (curl http://localhost:3000, scp x localhost:) isn't egress.
+  let dests: (string | null)[] = [];
+  if (lower === "curl" || lower === "wget" || lower === "http" || lower === "https") {
+    dests = args.filter((a) => a.value === null || (a.value.includes("://") && !a.value.startsWith("-"))).map((a) => a.value);
+    const bare = operands(args, new Set(["-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "--json", "-T", "--upload-file", "-F", "--form", "-o", "--output", "-O", "-H", "--header", "-u", "--user", "-X", "--request", "-A", "--user-agent", "-e", "--referer", "-b", "--cookie", "-c", "--cookie-jar", "-x", "--proxy", "--post-file", "--body-file", "--post-data", "--header"]));
+    for (const o of bare) if (o.value !== null && !o.value.includes("://") && /^(localhost|127\.|\[::1\])/i.test(o.value)) dests.push(o.value);
+  } else if (lower === "scp" || lower === "sftp") {
+    dests = operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"])).filter((o) => remoteOperand(o.value)).map((o) => o.value);
+  }
+  const loop = allLoopback(dests);
+  if (loop) { acc.reason("talks only to this machine (loopback)"); }
+  else { acc.tag("high-risk", "net.egress"); acc.network = true; }
   if (lower === "curl" || lower === "wget" || lower === "http" || lower === "https") {
     for (let i = 0; i < args.length; i++) {
-      const v = args[i]?.value ?? "";
-      const next = args[i + 1];
-      const takesFile = ["-d", "--data", "--data-binary", "--data-raw", "--data-urlencode", "-T", "--upload-file", "-F", "--form", "--post-file", "--body-file"];
-      if (takesFile.includes(v) && next) {
-        const nv = next.pathValue ?? "";
-        const file = v === "-T" || v === "--upload-file" || v === "--post-file" || v === "--body-file" ? nv : nv.includes("@") ? nv.slice(nv.indexOf("@") + 1).split(";")[0] ?? "" : "";
-        if (file && file !== "-") readTarget(normalizePath(file, pctx), acc, pctx, false);
-        if (next.substs.length > 0) acc.sensitiveArgs ||= false;
+      const v0 = args[i]?.value ?? "";
+      // wget accepts --opt=value; curl takes the value as the next word.
+      const eq = v0.startsWith("--") ? v0.indexOf("=") : -1;
+      const v = eq > 0 ? v0.slice(0, eq) : v0;
+      const next = eq > 0 ? ({ ...(args[i] as WordInfo), value: v0.slice(eq + 1), pathValue: v0.slice(eq + 1) } as WordInfo) : args[i + 1];
+      if (!next) continue;
+      const nv = next.value;
+      let file: string | null | undefined;
+      if (v === "-T" || v === "--upload-file" || v === "--post-file" || v === "--body-file") file = next.value === null ? null : next.pathValue ?? "";
+      else if (v === "-d" || v === "--data" || v === "--data-binary" || v === "--json") file = nv === null ? undefined : nv.startsWith("@") ? nv.slice(1) : undefined;
+      else if (v === "--data-urlencode") { if (nv !== null) { const at = nv.indexOf("@"); const eqi = nv.indexOf("="); if (at >= 0 && (eqi < 0 || at < eqi)) file = nv.slice(at + 1); } }
+      else if (v === "-F" || v === "--form") {
+        if (nv === null) file = null;
+        else { const e = nv.indexOf("="); const rest = e >= 0 ? nv.slice(e + 1) : ""; if (rest.startsWith("@") || rest.startsWith("<")) file = (rest.slice(1).split(";")[0] ?? ""); }
       }
-      if ((v === "-o" || v === "--output" || v === "-O" && lower === "wget") && next) {
-        const np = npOf(next, pctx);
+      if (file === null) { if (!loop) recordUpload(acc, "outside", "a file named at run time"); }
+      else if (file !== undefined && file !== "" && file !== "-") {
+        readTarget(normalizePath(file, pctx), acc, pctx, false);
+        uploadFile(file, c, loop);
+      }
+      if ((v === "-o" || v === "--output" || (v === "-O" && lower === "wget")) && args[i + 1]) {
+        const np = npOf(args[i + 1] as WordInfo, pctx);
         if (np) writeTarget(np, acc, pctx);
       }
     }
   }
   if (lower === "scp" || lower === "sftp") {
-    for (const o of operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"]))) {
-      if (o.value !== null && !/^[^/]*:/.test(o.value)) readTarget(normalizePath(o.value, pctx), acc, pctx, true);
+    const ops = operands(args, new Set(["-P", "-i", "-o", "-F", "-c", "-l", "-S", "-J"]));
+    const last = ops[ops.length - 1];
+    const toRemote = last !== undefined && remoteOperand(last.value);
+    for (const o of ops.slice(0, -1)) {
+      if (o.value !== null && remoteOperand(o.value)) continue; // a remote source: a download
+      if (o.value !== null) readTarget(normalizePath(o.value, pctx), acc, pctx, true);
+      if (toRemote) uploadFile(o, c, loop);
     }
   }
   if (lower === "ssh") {
@@ -974,6 +1054,22 @@ function cloudBulkDelete(lower: string, vals: string[]): boolean {
   return false;
 }
 
+/** --context naming a local cluster (kind, minikube, Docker Desktop…) or --server on loopback. */
+function localKubeContext(args: WordInfo[]): boolean {
+  const vals = args.map((a) => a.value ?? "");
+  const valueOf = (flag: string) => {
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] === flag) return vals[i + 1] ?? "";
+      if ((vals[i] ?? "").startsWith(flag + "=")) return (vals[i] ?? "").slice(flag.length + 1);
+    }
+    return null;
+  };
+  const ctxName = (valueOf("--context") ?? "").toLowerCase();
+  if (/^(kind|minikube|docker-desktop|docker-for-desktop|rancher-desktop|orbstack|colima|microk8s|k3d-.+|kind-.+)$/.test(ctxName)) return true;
+  const server = valueOf("--server") ?? valueOf("-s");
+  return server !== null && allLoopback([server]);
+}
+
 function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
   const { acc } = c;
   acc.network = true;
@@ -984,6 +1080,16 @@ function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
     acc.tag("high-risk", "fs.destroy", "net.egress");
     acc.reason("deletes cloud storage objects in bulk, which can't be recovered");
     return;
+  }
+  if (lower === "kubectl") {
+    // Rev 8 (Q2): label/annotate warn; delete/apply/scale ask unless the context is local.
+    if (sub === "label" || sub === "annotate") { acc.tag("high-risk", "net.egress"); acc.reason(`kubectl ${sub} changes object metadata`); return; }
+    if (sub === "delete" || sub === "apply" || sub === "scale") {
+      if (localKubeContext(args)) { acc.tag("high-risk", "net.egress"); acc.reason(`kubectl ${sub} on a local cluster`); return; }
+      acc.tag("high-risk", "infra.change", "net.egress");
+      acc.reason(`kubectl ${sub} on a cluster that isn't known to be local`);
+      return;
+    }
   }
   if (lower === "vercel") {
     if (vals.includes("--prod") || vals.includes("--production") || sub === "promote") { acc.tag("high-risk", "deploy.prod", "net.egress"); return; }

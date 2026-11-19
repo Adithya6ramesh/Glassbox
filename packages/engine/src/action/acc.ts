@@ -17,6 +17,8 @@ export class Acc {
   envDump = false;
   /** Git remotes added or repointed in this command, and push destinations (CP-EXFIL-034). */
   newRemotes: string[] = [];
+  /** Local files this command uploads, by kind (upload.ts). */
+  uploads: ("sensitive" | "outside" | "project")[] = [];
   pushedTo: string[] = [];
   /** Paths read that are sensitive (for signals); labels only. */
 
@@ -74,6 +76,7 @@ export class Acc {
     this.sensitiveArgs ||= o.sensitiveArgs;
     this.envDump ||= o.envDump;
     this.newRemotes.push(...o.newRemotes);
+    this.uploads.push(...o.uploads);
     this.pushedTo.push(...o.pushedTo);
   }
 
