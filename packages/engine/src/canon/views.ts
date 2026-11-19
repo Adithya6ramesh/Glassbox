@@ -132,7 +132,25 @@ function makeView(pieces: Piece[], origLength: number): View {
   };
 }
 
+// ASCII fast paths. Most input is ASCII, and calling normalize() and Unicode-property regexes
+// per character dominated scan time (Step 6 bench). The tables are built by the same slow
+// functions, so results are identical by construction.
+function isWs(ch: string): boolean {
+  const c = ch.charCodeAt(0);
+  if (ch.length === 1 && c < 0x80) return c === 0x20 || (c >= 0x09 && c <= 0x0d);
+  return RE_WS.test(ch);
+}
+
+let ASCII_NORM: string[] | null = null;
+let ASCII_SKEL: string[] | null = null;
+const asciiTable = (fn: (s: string) => string): string[] => initTimed(() => Array.from({ length: 128 }, (_, c) => fn(String.fromCharCode(c))));
+
 function normChar(s: string): string {
+  if (s.length === 1 && s.charCodeAt(0) < 0x80) return (ASCII_NORM ??= asciiTable(normCharSlow))[s.charCodeAt(0)] as string;
+  return normCharSlow(s);
+}
+
+function normCharSlow(s: string): string {
   let cur = s;
   for (let n = 0; n < 4; n++) {
     const next = cur.normalize("NFKC").toLowerCase();
@@ -143,6 +161,11 @@ function normChar(s: string): string {
 }
 
 function skeletonChar(s: string): string {
+  if (s.length === 1 && s.charCodeAt(0) < 0x80) return (ASCII_SKEL ??= asciiTable(skeletonCharSlow))[s.charCodeAt(0)] as string;
+  return skeletonCharSlow(s);
+}
+
+function skeletonCharSlow(s: string): string {
   let cur = s;
   for (let n = 0; n < 4; n++) {
     let mapped = "";
@@ -164,7 +187,7 @@ function collapse(pieces: Piece[]): Piece[] {
   let pendingSpace: number | null = null;
   for (const p of pieces) {
     for (const ch of p.text) {
-      if (RE_WS.test(ch)) {
+      if (isWs(ch)) {
         if (pendingSpace === null) pendingSpace = p.orig;
         continue;
       }
@@ -220,7 +243,11 @@ export function buildViews(original: string): Views {
       facts.invisibles.push({ cp, index });
       continue;
     }
-    if (HANGUL_FILLERS.has(cp) || cp === 0x034f || RE_CF.test(ch) || (RE_CC.test(ch) && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d)) {
+    // ASCII has no Cf characters; its Cc characters are 0x00–0x1f and 0x7f.
+    const invisible = cp < 0x80
+      ? (cp < 0x20 || cp === 0x7f) && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d
+      : HANGUL_FILLERS.has(cp) || cp === 0x034f || RE_CF.test(ch) || (RE_CC.test(ch) && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d);
+    if (invisible) {
       facts.invisibles.push({ cp, index });
       continue;
     }
@@ -234,7 +261,7 @@ export function buildViews(original: string): Views {
   // Padding: a long run of whitespace followed by more text.
   let nl = 0, wsRun = 0;
   for (const p of visiblePieces) {
-    if (RE_WS.test(p.text)) {
+    if (isWs(p.text)) {
       wsRun++;
       if (p.text === "\n") nl++;
     } else {
@@ -253,6 +280,9 @@ export function buildViews(original: string): Views {
 }
 
 /** Norm view text only (used to canonicalize rule phrases at load). */
+/** For match.ts's rawNorm: the same per-character NFKC + lowercase as the norm view. */
+export { normChar };
+
 export function normText(s: string): string {
   return buildViews(s).norm.text;
 }

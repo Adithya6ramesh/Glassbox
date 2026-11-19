@@ -1,7 +1,7 @@
 // Layer 1 declarative matching (engine-spec §3.2, §6.6, §10.1).
 import { findDecodable } from "../canon/decode.js";
-import { buildViews, type Views } from "../canon/views.js";
-import { detectSecrets } from "../secrets/detect.js";
+import { buildViews, normChar, type Views } from "../canon/views.js";
+import { detectSecrets, type SecretMemo } from "../secrets/detect.js";
 import type { Matcher, RuleDef, Severity, ViaKind, ViewName } from "../types.js";
 import { findAll } from "../util/re.js";
 
@@ -18,6 +18,8 @@ export interface FieldScan {
   segments: Segment[];
   windowed: boolean;
   decodeExhausted: boolean;
+  /** Secret-detection results per view text, shared by every secret rule on this field. */
+  secrets: SecretMemo;
 }
 
 const RE_WORDCH = /^[\p{L}\p{M}\p{N}]$/u;
@@ -29,10 +31,10 @@ function rawNormOf(s: string): string {
   let out = "";
   let space = false;
   for (const ch of s) {
-    let t = ch;
-    for (let n = 0; n < 4; n++) { const x = t.normalize("NFKC").toLowerCase(); if (x === t) break; t = x; }
+    const t = normChar(ch);
     for (const c of t) {
-      if (RE_WS.test(c)) { space = out.length > 0; continue; }
+      const cc = c.charCodeAt(0);
+      if (c.length === 1 && cc < 0x80 ? cc === 0x20 || (cc >= 0x09 && cc <= 0x0d) : RE_WS.test(c)) { space = out.length > 0; continue; }
       if (space) { out += " "; space = false; }
       out += c;
     }
@@ -71,7 +73,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
   const before = budget.bytes;
   if (text.length <= maxFieldScanBytes) {
     const seg = segmentOf(text, 0, budget, maxDecodeDepth);
-    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0 };
+    return { segments: [seg], windowed: false, decodeExhausted: budget.bytes <= 0 && before > 0 && seg.decoded.length > 0, secrets: new Map() };
   }
   const h = Math.floor(maxFieldScanBytes * 0.75);
   const t = maxFieldScanBytes - h;
@@ -79,6 +81,7 @@ export function scanField(text: string, maxFieldScanBytes: number, budget: { byt
     segments: [segmentOf(text.slice(0, h), 0, budget, maxDecodeDepth), segmentOf(text.slice(text.length - t), text.length - t, budget, maxDecodeDepth)],
     windowed: true,
     decodeExhausted: budget.bytes <= 0,
+    secrets: new Map(),
   };
 }
 
@@ -143,7 +146,7 @@ function matchPhrases(text: string, phrases: string[][], gap: number): Hit | nul
   return null;
 }
 
-function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "other", keyName?: string): Hit | null {
+function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "other", keyName?: string, memo?: SecretMemo): Hit | null {
   switch (m.type) {
     case "phrase": {
       const pt = phraseTokens(m);
@@ -154,7 +157,7 @@ function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "
       return r ? { start: r.start, end: r.end } : null;
     }
     case "secret": {
-      const s = detectSecrets(text, keyName).find((x) => m.detector === "any" || x.type === m.detector);
+      const s = detectSecrets(text, keyName, memo).find((x) => m.detector === "any" || x.type === m.detector);
       return s ? { start: s.start, end: s.end } : null;
     }
     case "codepoints": {
@@ -170,18 +173,18 @@ function evalMatcher(m: Matcher, text: string, viewKind: "norm" | "skeleton" | "
     case "all": {
       let span: Hit | null = null;
       for (const sub of m.of) {
-        const h = evalMatcher(sub, text, viewKind, keyName);
+        const h = evalMatcher(sub, text, viewKind, keyName, memo);
         if (!h) return null;
         span = span ? { start: Math.min(span.start, h.start), end: Math.max(span.end, h.end) } : h;
       }
       return span;
     }
     case "any": {
-      for (const sub of m.of) { const h = evalMatcher(sub, text, viewKind, keyName); if (h) return h; }
+      for (const sub of m.of) { const h = evalMatcher(sub, text, viewKind, keyName, memo); if (h) return h; }
       return null;
     }
     case "not":
-      return evalMatcher(m.of, text, viewKind, keyName) ? null : { start: 0, end: 0 };
+      return evalMatcher(m.of, text, viewKind, keyName, memo) ? null : { start: 0, end: 0 };
     case "structural":
       return null;
   }
@@ -209,32 +212,32 @@ export function matchRule(rule: RuleDef, scan: FieldScan, keyName: string | unde
     });
     // Plain views first.
     if (views.has("original")) {
-      const h = evalMatcher(rule.matcher, v.original, "other", keyName);
+      const h = evalMatcher(rule.matcher, v.original, "other", keyName, scan.secrets);
       if (h) return { ...at(h, (i) => i), via: [], severity: rule.severity };
     }
     if (views.has("visible")) {
-      const h = evalMatcher(rule.matcher, v.visible.text, "other", keyName);
+      const h = evalMatcher(rule.matcher, v.visible.text, "other", keyName, scan.secrets);
       if (h) {
-        const plain = evalMatcher(rule.matcher, v.original, "other", keyName);
+        const plain = evalMatcher(rule.matcher, v.original, "other", keyName, scan.secrets);
         const via: ViaKind[] = plain ? [] : ["invisible-stripped"];
         return { ...at(h, (i) => v.visible.toOriginal(i)), via, severity: via.length && escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }
     if (views.has("norm")) {
-      const h = evalMatcher(rule.matcher, v.norm.text, "norm", keyName);
+      const h = evalMatcher(rule.matcher, v.norm.text, "norm", keyName, scan.secrets);
       if (h) {
-        const plain = evalMatcher(rule.matcher, seg.rawNorm, "norm", keyName);
+        const plain = evalMatcher(rule.matcher, seg.rawNorm, "norm", keyName, scan.secrets);
         const via: ViaKind[] = plain ? [] : ["invisible-stripped"];
         return { ...at(h, (i) => v.norm.toOriginal(i)), via, severity: via.length && escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }
     if (views.has("skeleton")) {
-      const h = evalMatcher(rule.matcher, v.skeleton.text, "skeleton", keyName);
+      const h = evalMatcher(rule.matcher, v.skeleton.text, "skeleton", keyName, scan.secrets);
       if (h) return { ...at(h, (i) => v.skeleton.toOriginal(i)), via: ["skeleton"], severity: escalate ? maxSev(rule.severity, "high") : rule.severity };
     }
     if (views.has("tagDecoded") && v.tagDecoded.length > 0) {
       const tv = buildViews(v.tagDecoded);
-      const h = evalMatcher(rule.matcher, tv.norm.text, "norm", keyName) ?? evalMatcher(rule.matcher, tv.visible.text, "other", keyName);
+      const h = evalMatcher(rule.matcher, tv.norm.text, "norm", keyName, scan.secrets) ?? evalMatcher(rule.matcher, tv.visible.text, "other", keyName, scan.secrets);
       if (h) {
         const span = seg.tagSpan ?? { start: 0, end: v.original.length };
         return { start: seg.offset + span.start, end: seg.offset + span.end, via: ["tag-chars"], severity: escalate ? maxSev(rule.severity, "critical") : rule.severity };
@@ -244,10 +247,10 @@ export function matchRule(rule: RuleDef, scan: FieldScan, keyName: string | unde
       for (const d of seg.decoded) {
         const dv = d.views;
         const h =
-          (views.has("original") ? evalMatcher(rule.matcher, dv.original, "other", keyName) : null) ??
-          (views.has("visible") ? evalMatcher(rule.matcher, dv.visible.text, "other", keyName) : null) ??
-          evalMatcher(rule.matcher, dv.norm.text, "norm", keyName) ??
-          (views.has("skeleton") ? evalMatcher(rule.matcher, dv.skeleton.text, "skeleton", keyName) : null);
+          (views.has("original") ? evalMatcher(rule.matcher, dv.original, "other", keyName, scan.secrets) : null) ??
+          (views.has("visible") ? evalMatcher(rule.matcher, dv.visible.text, "other", keyName, scan.secrets) : null) ??
+          evalMatcher(rule.matcher, dv.norm.text, "norm", keyName, scan.secrets) ??
+          (views.has("skeleton") ? evalMatcher(rule.matcher, dv.skeleton.text, "skeleton", keyName, scan.secrets) : null);
         if (h) return { start: seg.offset + d.start, end: seg.offset + d.end, via: [d.via], severity: escalate ? maxSev(rule.severity, "high") : rule.severity };
       }
     }

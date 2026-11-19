@@ -12,6 +12,14 @@ export interface SecretHit {
 
 interface Detector {
   type: string;
+  /**
+   * Literals every match contains. When none occurs in the text the pattern can't match, so
+   * the regex pass is skipped (a plain substring search is far cheaper than re2js's NFA).
+   * Keep these in sync with `pattern`: the static test in secrets.test checks each pattern's
+   * example matches contain one of its anchors.
+   */
+  anchors: readonly string[];
+  anchorsCI?: boolean;
   pattern: string;
   flags?: "i";
   group?: number;
@@ -46,29 +54,29 @@ function classes(s: string): number {
 }
 
 const DETECTORS: Detector[] = [
-  { type: "private-key", pattern: "-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----", confidence: 0.99 },
-  { type: "anthropic-key", pattern: "sk-ant-(?:api|admin)\\d\\d-[A-Za-z0-9_\\-]{80,}", confidence: 0.98 },
-  { type: "github-token", pattern: "(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{82})", confidence: 0.95 },
-  { type: "gitlab-token", pattern: "gl(?:pat|dt|rt)-[A-Za-z0-9_\\-]{20,}", confidence: 0.95 },
-  { type: "slack-webhook", pattern: "https://hooks\\.slack\\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+", confidence: 0.95 },
-  { type: "slack-token", pattern: "(?:xox[abprs]|xapp)-[A-Za-z0-9\\-]{10,}", confidence: 0.95 },
-  { type: "stripe-key", pattern: "(?:(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}|whsec_[A-Za-z0-9]{24,})", confidence: 0.95 },
-  { type: "gcp-api-key", pattern: "AIza[0-9A-Za-z_\\-]{35}", confidence: 0.95 },
-  { type: "aws-access-key-id", pattern: "(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}", confidence: 0.95 },
+  { type: "private-key", anchors: ["PRIVATE KEY"], pattern: "-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----", confidence: 0.99 },
+  { type: "anthropic-key", anchors: ["sk-ant-"], pattern: "sk-ant-(?:api|admin)\\d\\d-[A-Za-z0-9_\\-]{80,}", confidence: 0.98 },
+  { type: "github-token", anchors: ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"], pattern: "(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{82})", confidence: 0.95 },
+  { type: "gitlab-token", anchors: ["glpat-", "gldt-", "glrt-"], pattern: "gl(?:pat|dt|rt)-[A-Za-z0-9_\\-]{20,}", confidence: 0.95 },
+  { type: "slack-webhook", anchors: ["https://hooks.slack.com/services/"], pattern: "https://hooks\\.slack\\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+", confidence: 0.95 },
+  { type: "slack-token", anchors: ["xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-", "xapp-"], pattern: "(?:xox[abprs]|xapp)-[A-Za-z0-9\\-]{10,}", confidence: 0.95 },
+  { type: "stripe-key", anchors: ["sk_live_", "sk_test_", "rk_live_", "rk_test_", "whsec_"], pattern: "(?:(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{24,}|whsec_[A-Za-z0-9]{24,})", confidence: 0.95 },
+  { type: "gcp-api-key", anchors: ["AIza"], pattern: "AIza[0-9A-Za-z_\\-]{35}", confidence: 0.95 },
+  { type: "aws-access-key-id", anchors: ["AKIA", "ASIA", "ABIA", "ACCA"], pattern: "(?:AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}", confidence: 0.95 },
   {
-    type: "aws-secret-access-key",
+    type: "aws-secret-access-key", anchors: ["aws"], anchorsCI: true,
     pattern: "(?i)aws[A-Za-z0-9_\\-]{0,20}(?:secret|key)[A-Za-z0-9_\\-]{0,20}[\"']?\\s*[:=]\\s*[\"']?([A-Za-z0-9/+]{40})",
     group: 1, confidence: 0.8,
     validate: (v) => (entropy(v) >= 4.0 ? null : -1),
   },
-  { type: "azure-storage-key", pattern: "AccountKey=[A-Za-z0-9+/=]{20,}", confidence: 0.9 },
-  { type: "azure-conn-string", pattern: "SharedAccessSignature=[^;\\s\"']{16,}", confidence: 0.9 },
+  { type: "azure-storage-key", anchors: ["AccountKey="], pattern: "AccountKey=[A-Za-z0-9+/=]{20,}", confidence: 0.9 },
+  { type: "azure-conn-string", anchors: ["SharedAccessSignature="], pattern: "SharedAccessSignature=[^;\\s\"']{16,}", confidence: 0.9 },
   {
-    type: "openai-key", pattern: "sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\\-]{20,}", confidence: 0.85,
+    type: "openai-key", anchors: ["sk-"], pattern: "sk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_\\-]{20,}", confidence: 0.85,
     validate: (v) => (v.startsWith("sk-ant-") ? -1 : null),
   },
   {
-    type: "jwt", pattern: "eyJ[A-Za-z0-9_\\-]{5,}\\.eyJ[A-Za-z0-9_\\-]{5,}\\.[A-Za-z0-9_\\-]{10,}", confidence: 0.85,
+    type: "jwt", anchors: ["eyJ"], pattern: "eyJ[A-Za-z0-9_\\-]{5,}\\.eyJ[A-Za-z0-9_\\-]{5,}\\.[A-Za-z0-9_\\-]{10,}", confidence: 0.85,
     validate: (v) => {
       try {
         const head = (v.split(".")[0] ?? "").replace(/-/g, "+").replace(/_/g, "/");
@@ -80,7 +88,7 @@ const DETECTORS: Detector[] = [
     },
   },
   {
-    type: "db-connection-string",
+    type: "db-connection-string", anchors: ["postgres://", "postgresql://", "mysql://", "mongodb://", "mongodb+srv://", "redis://", "rediss://", "amqp://", "amqps://", "mssql://"],
     pattern: "(?:postgres(?:ql)?|mysql|mongodb(?:\\+srv)?|redis|rediss|amqps?|mssql)://([^:@/\\s\"']+):([^@\\s\"']+)@[^\\s/\"']+",
     confidence: 0.9,
     validate: (v) => {
@@ -90,6 +98,8 @@ const DETECTORS: Detector[] = [
     },
   },
 ];
+
+const GENERIC_ANCHORS = ["key", "token", "secret", "passw", "pwd", "auth", "credential", "bearer", "session", "private"];
 
 const KEYWORD = "(?i)[A-Za-z0-9_.\\-]*(?:key|token|secret|passw(?:or)?d|pwd|auth|credential|bearer|session|private)[A-Za-z0-9_.\\-]*";
 const KEY_NAME = /(key|token|secret|passw(or)?d|pwd|auth|credential|api[-_]?key|private|bearer|session)/i;
@@ -121,10 +131,32 @@ function extendPem(text: string, start: number, end: number): number {
  * Detects secrets in `text`. `keyName` is the JSON key the text sits under (for the
  * generic high-entropy detector, which needs a key-like name).
  */
-export function detectSecrets(text: string, keyName?: string): SecretHit[] {
+export function detectSecrets(text: string, keyName?: string, memo?: SecretMemo): SecretHit[] {
+  if (!memo) return detectUncached(text, keyName);
+  const k = keyName ?? "\u0000";
+  let byText = memo.get(k);
+  if (!byText) { byText = new Map(); memo.set(k, byText); }
+  let hits = byText.get(text);
+  if (!hits) { hits = detectUncached(text, keyName); byText.set(text, hits); }
+  return hits;
+}
+
+/** Per-call cache: keyName → text → hits. Owned by one scan, never shared across calls. */
+export type SecretMemo = Map<string, Map<string, SecretHit[]>>;
+
+function detectUncached(text: string, keyName?: string): SecretHit[] {
   const hits: SecretHit[] = [];
   if (text.length < 8) return hits;
+  let lower: string | undefined;
+  const has = (lits: readonly string[], ci: boolean | undefined): boolean => {
+    // re2 (?i) folds U+017F (long s) to s and U+212A (Kelvin) to k; toLowerCase handles the
+    // Kelvin sign but not long s, so fold it here or "\u017fecret=..." would skip the pass.
+    if (ci) lower ??= text.toLowerCase().replaceAll("\u017f", "s");
+    const hay = ci ? (lower as string) : text;
+    return lits.some((l) => hay.includes(l));
+  };
   for (const d of DETECTORS) {
+    if (!has(d.anchors, d.anchorsCI)) continue;
     for (const m of findAll(d.pattern, text, d.flags, 50)) {
       let start = m.start, end = m.end;
       let value = m.text;
@@ -148,7 +180,8 @@ export function detectSecrets(text: string, keyName?: string): SecretHit[] {
     }
   }
   // Generic: key=value pairs inside text with a key-like name.
-  for (const m of findAll(`(${KEYWORD})\\s*["']?\\s*[:=]\\s*["']?([^\\s"'&,;]{20,512})`, text, undefined, 50)) {
+  const generic = (text.includes("=") || text.includes(":")) && has(GENERIC_ANCHORS, true);
+  for (const m of generic ? findAll(`(${KEYWORD})\\s*["']?\\s*[:=]\\s*["']?([^\\s"'&,;]{20,512})`, text, undefined, 50) : []) {
     const v = m.groups[1] ?? "";
     const name = m.groups[0] ?? "";
     if (EXCLUDED_KEY.test(name) || !looksGeneric(v)) continue;
