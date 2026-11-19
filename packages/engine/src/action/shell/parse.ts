@@ -423,7 +423,9 @@ class Parser {
         if (this.src[j] === "[") { const close = this.src.indexOf("]", j); if (close > 0) j = close + 1; }
         if (this.src[j] === "+" && this.src[j + 1] === "=") j++;
         if (this.src[j] === "=") {
-          const name = this.src.slice(this.i, j).replace(/\+$/, "").replace(/\[.*$/, "");
+          const raw = this.src.slice(this.i, j);
+          const plus = raw.endsWith("+") ? raw.slice(0, -1) : raw;
+          const name = plus.includes("[") ? plus.slice(0, plus.indexOf("[")) : plus;
           this.i = j + 1;
           if (this.peek() === "(") throw new Unanalyzable("array assignment is not supported");
           const start = this.i;

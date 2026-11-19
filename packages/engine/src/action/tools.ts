@@ -3,7 +3,7 @@ import type { ActionTag, ToolDef } from "../types.js";
 import { get, getString, isRecord } from "../util/misc.js";
 import { Acc } from "./acc.js";
 import {
-  coversProtectedRead, globCoversProtectedRead, isProtected, isProtectedRead, normalizePath, sensitiveLabel, type PathCtx,
+  coversProtectedRead, globCoversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, type PathCtx,
 } from "./paths.js";
 import { analyzePowerShell } from "./powershell.js";
 import { isProtectedWrite } from "./protected-write.js";
@@ -18,6 +18,8 @@ const WRITE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"]);
 export function writePath(path: string, acc: Acc, t: ToolCtx): void {
   const np = normalizePath(path, t.pctx);
   if (isProtectedWrite(np, t.pctx)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
+  const persist = persistenceLabel(np, t.pctx);
+  if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   if (p.includes("/.git/hooks/") || p.endsWith("/.git/config") || p.includes("/.husky/") || p.endsWith("/.envrc") || p.endsWith("/.bashrc") || p.endsWith("/.zshrc") || p.endsWith("/.profile") || p.endsWith("/.bash_profile") || p.endsWith("/.pre-commit-config.yaml") || p.endsWith("profile.ps1") || p.includes("/library/launchagents/") || p.includes("/.config/systemd/user/")) {
     acc.tag("high-risk", "config.agent");
@@ -166,6 +168,7 @@ export function classifyMcp(name: string, args: unknown, descriptor: ToolDef | u
       const np = normalizePath(v, t.pctx);
       if (isProtectedRead(np, t.pctx)) acc.protect("CP-SELF-002", "reads a Glassbox credential file");
       else if (!isRead && isProtected(np, t.pctx)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
+      else if (!isRead && persistenceLabel(np, t.pctx)) acc.protect("CP-SELF-004", `changes a ${persistenceLabel(np, t.pctx) ?? ""}`);
       else if (isRead) { const label = sensitiveLabel(np, t.pctx); if (label) { acc.tags.add("fs.read.sensitive"); acc.sensitive.push(label); acc.sensitiveArgs = true; acc.find("CP-EXFIL-040", label); } }
     }
   }

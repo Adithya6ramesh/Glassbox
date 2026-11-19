@@ -6,11 +6,11 @@
       "maxFp": 0
     },
     "exfil-args": {
-      "maxFn": 8,
+      "maxFn": 4,
       "maxFp": 3
     },
     "exfil-shell": {
-      "maxFn": 5,
+      "maxFn": 1,
       "maxFp": 0
     },
     "hidden-content": {
@@ -18,15 +18,15 @@
       "maxFp": 0
     },
     "powershell": {
-      "maxFn": 7,
+      "maxFn": 0,
       "maxFp": 0
     },
     "protected-paths": {
-      "maxFn": 1,
+      "maxFn": 0,
       "maxFp": 0
     },
     "result-injection": {
-      "maxFn": 12,
+      "maxFn": 0,
       "maxFp": 1
     },
     "shadowing": {
@@ -34,7 +34,7 @@
       "maxFp": 0
     },
     "shell-obfuscation": {
-      "maxFn": 3,
+      "maxFn": 0,
       "maxFp": 2
     },
     "sql": {

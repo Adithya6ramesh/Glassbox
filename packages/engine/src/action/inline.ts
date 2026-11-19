@@ -6,6 +6,14 @@ import { test } from "../util/re.js";
 export interface InlineVerdict {
   unanalyzable: string | null;
   dangerous: boolean;
+  /** Deletes a whole directory tree (rmtree, rmSync recursive, rm_rf, File::Path). */
+  destroysTree: boolean;
+  /** Refers to the home directory or the filesystem root. */
+  homeOrRoot: boolean;
+  /** Uses the network. */
+  network: boolean;
+  /** Refers to credential files or reads the whole environment. */
+  sensitive: boolean;
 }
 
 const MARKERS: [string, string][] = [
@@ -37,10 +45,24 @@ const DANGEROUS = [
   "open\\s*\\([^)]*,\\s*['\"](w|a|x|r\\+|wb|ab)", "\\bprocess\\.kill\\b", "\\bDeno\\.(run|remove|writeTextFile)",
 ];
 
+// Spec rev 6, Q3 item 3: what dangerous inline code is aimed at (re2 patterns, linear time).
+const TREE_DELETE = "\\b(rmtree|removedirs|rm_rf|remove_dir_all|rmdir_p)\\b|\\b(rmSync|rm)\\s*\\(.{0,300}?recursive\\s*:\\s*true|File::Path";
+const HOME_OR_ROOT = "expanduser\\s*\\(\\s*['\"]~|\\bhomedir\\s*\\(|Path\\.home\\s*\\(|\\$ENV\\{\\s*['\"]?HOME|ENV\\[\\s*['\"]HOME|environ\\[\\s*['\"]HOME|process\\.env\\.HOME|getenv\\(\\s*['\"](HOME|USERPROFILE)|['\"](~|/|~/\\*?|/\\*|[A-Za-z]:\\\\?)['\"]";
+const NETWORK = "\\b(socket|urllib|urllib2|urllib3|requests|httpx|aiohttp|fetch|axios|XMLHttpRequest|WebSocket|smtplib|ftplib|paramiko|LWP|IO::Socket|open-uri)\\b|net\\.connect|HTTP::Tiny|Net::HTTP|https?\\.(request|get)\\b";
+const SENSITIVE = "\\.ssh|id_rsa|id_ed25519|\\.aws|credentials|\\.netrc|\\.git-credentials|\\.kube|\\.config/gh|(^|[^.\\w])\\.env\\b|os\\.environ\\s*($|[^\\[.\\s]|\\.(items|copy)\\b)|dict\\(\\s*os\\.environ|process\\.env\\s*($|[^.\\[\\s])|JSON\\.stringify\\(\\s*process\\.env\\b|%ENV\\b|ENV\\.to_h";
+
 export function analyzeInlineCode(code: string): InlineVerdict {
-  if (code.length > 16 * 1024) return { unanalyzable: "inline code is too long to analyze", dangerous: true };
+  const none = { destroysTree: false, homeOrRoot: false, network: false, sensitive: false };
+  if (code.length > 16 * 1024) return { unanalyzable: "inline code is too long to analyze", dangerous: true, ...none };
   for (const [pattern, label] of MARKERS) {
-    if (test(pattern, code)) return { unanalyzable: `inline code uses an obfuscation marker (${label})`, dangerous: true };
+    if (test(pattern, code)) return { unanalyzable: `inline code uses an obfuscation marker (${label})`, dangerous: true, ...none };
   }
-  return { unanalyzable: null, dangerous: DANGEROUS.some((p) => test(p, code)) };
+  return {
+    unanalyzable: null,
+    dangerous: DANGEROUS.some((p) => test(p, code)),
+    destroysTree: test(TREE_DELETE, code),
+    homeOrRoot: test(HOME_OR_ROOT, code),
+    network: test(NETWORK, code),
+    sensitive: test(SENSITIVE, code),
+  };
 }

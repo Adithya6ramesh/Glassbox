@@ -271,9 +271,19 @@ export function buildViews(original: string): Views {
     }
   }
 
-  const normPieces = collapse(visiblePieces.map((p) => ({ text: normChar(p.text), orig: p.orig })));
+  // Per-call caches for non-ASCII characters (ASCII already uses tables): text repeats the same
+  // characters, and normalize() per character dominated non-Latin input.
+  const normCache = new Map<string, string>();
+  const skelCache = new Map<string, string>();
+  const cached = (cache: Map<string, string>, fn: (s: string) => string, ch: string): string => {
+    if (ch.length === 1 && ch.charCodeAt(0) < 0x80) return fn(ch);
+    let r = cache.get(ch);
+    if (r === undefined) { r = fn(ch); cache.set(ch, r); }
+    return r;
+  };
+  const normPieces = collapse(visiblePieces.map((p) => ({ text: cached(normCache, normChar, p.text), orig: p.orig })));
   const norm = makeView(normPieces, original.length);
-  const skelPieces = collapse(normPieces.map((p) => ({ text: skeletonChar(p.text), orig: p.orig })));
+  const skelPieces = collapse(normPieces.map((p) => ({ text: cached(skelCache, skeletonChar, p.text), orig: p.orig })));
   const skeleton = makeView(skelPieces, original.length);
 
   return { original, visible, norm, skeleton, tagDecoded, facts };

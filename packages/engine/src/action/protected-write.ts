@@ -1,6 +1,7 @@
 // Write targets that reach protected paths indirectly (red team, Phase 0 Step 4):
 // - an ancestor directory (moving or deleting ~/.claude moves its settings and hooks)
 // - a glob that could match a protected file or a path inside a protected directory
+import { trimEndChars } from "../util/misc.js";
 import { ANYWHERE, entries, fold, isProtected, isProtectedRead, normalizeFull, readProtectedEntries, type NormPath, type PathCtx } from "./paths.js";
 
 interface Cand { p: string; dir: boolean; project: boolean }
@@ -60,7 +61,7 @@ function segsMatch(ps: string[], xs: string[]): boolean {
 export function isProtectedWrite(np: NormPath, ctx: PathCtx, isGlob = false): boolean {
   if (isProtected(np, ctx) || isProtectedRead(np, ctx)) return true;
   if (np.path === null) return false;
-  const p = np.path.replace(/\/+$/, "");
+  const p = trimEndChars(np.path, "/");
   if (p.length === 0) return false;
   const cwd = ctx.cwd !== null ? normalizeFull(ctx.cwd, ctx) : null;
   const insideProject = cwd !== null && p.startsWith(cwd + "/");

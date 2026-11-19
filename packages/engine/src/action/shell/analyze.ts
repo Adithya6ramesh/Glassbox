@@ -1,8 +1,9 @@
 // Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
 import { Acc } from "../acc.js";
+import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
-  coversProtectedRead, isProtected, isProtectedRead, normalizePath, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
+  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
@@ -143,6 +144,7 @@ export function analyzeScript(script: Script, st: ShellState, acc: Acc): void {
   const cwdStack = { cwd: st.pctx.cwd };
   for (const cmd of script.commands) analyzeSimple(cmd, st, acc, cwdStack, script.functions);
   if (acc.network && acc.sensitiveArgs) acc.find("CP-EXFIL-030", "sensitive file and network call in one command");
+  else if (acc.network && acc.envDump) acc.find("CP-EXFIL-030", "environment variables and a network call in one command");
 }
 
 function analyzeSubsts(w: WordInfo, st: ShellState, acc: Acc, commandPosition: boolean): void {
@@ -157,6 +159,7 @@ function analyzeSubsts(w: WordInfo, st: ShellState, acc: Acc, commandPosition: b
       acc.raise("high-risk");
     }
     if (inner.sensitive.length > 0) { acc.sensitive.push(...inner.sensitive); acc.sensitiveArgs = true; }
+    if (inner.envDump) acc.envDump = true;
     if (commandPosition) { acc.unanalyzable("command name comes from a command substitution"); continue; }
     if (inner.unanalyzableFlag) { acc.unanalyzable("command substitution contains an unanalyzable command"); continue; }
     const unknown = inner.tags.has("exec.unknown") || inner.tags.has("exec.project-code") || inner.tags.has("exec.inline-code") || inner.tags.has("exec.nested-agent");
@@ -243,8 +246,10 @@ function destroy(acc: Acc, why: string): void {
 /** Checks for a path that is written, created, moved, deleted, chmod-ed or linked. */
 function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): void {
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
+  const persist = persistenceLabel(np, pctx);
+  if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
-  const home = pctx.homeDir.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
   const deferred =
     p.includes("/.git/hooks/") || p.endsWith("/.git/config") || p.includes("/.husky/") || p.endsWith("/.pre-commit-config.yaml") || p.endsWith("/.envrc") ||
@@ -340,6 +345,20 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
 
   if (functions.includes(name)) return; // body already analyzed
 
+  // Whole-environment dumps (correlated with network calls in analyzeScript).
+  const flagsOnly = (allowed: string[]) => args.every((a) => a.value !== null && allowed.includes(a.value));
+  if ((lower === "printenv" && args.length === 0) || (["set", "export", "declare", "typeset"].includes(lower) && flagsOnly(["-p", "-x", "-px", "-xp"]))) acc.envDump = true;
+  if (lower === "compgen" && hasFlag(args, "-e", "-v")) acc.envDump = true;
+
+  // DNS lookups of a name built from command output or variables: data smuggled out in DNS.
+  if (["nslookup", "dig", "host", "drill", "ping", "ping6", "resolvectl", "getent"].includes(lower)) {
+    if (operands(args).some((a) => a.substs.length > 0 || a.value === null)) {
+      acc.tag("high-risk", "net.egress");
+      acc.network = true;
+      acc.find("CP-EXFIL-033", `${lower} looks up a name built from command output or variables`);
+    }
+  }
+
   // ── Wrappers ───────────────────────────────────────────────────────────
   const unwrap = (rest: WordInfo[]) => {
     if (unwrapDepth >= 4) { acc.unanalyzable("too many nested wrapper commands"); return; }
@@ -382,7 +401,7 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
         break;
       }
       const rest = args.slice(i);
-      if (rest.length === 0) return; // prints the environment
+      if (rest.length === 0) { acc.envDump = true; return; } // prints the environment
       return unwrap(rest);
     }
     case "command": case "builtin": {
@@ -502,7 +521,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
   if (lower.startsWith("mkfs") || lower === "diskpart" || lower === "fdisk" || lower === "parted" || lower === "wipefs" || lower === "format") { destroy(acc, "formats or repartitions a disk"); return; }
   if (["chmod", "chown", "chgrp", "setfacl", "chattr", "icacls", "takeown", "attrib", "passwd", "usermod", "useradd", "visudo", "setcap"].includes(lower)) return perm(lower, args, c);
-  if (lower === "crontab") { acc.tag("high-risk", "config.agent"); acc.reason("changes scheduled jobs"); return; }
+  if (lower === "crontab") {
+    // Listing is a read; installing, editing or removing a crontab is persistence (CP-SELF-004).
+    const flags = args.map((a) => a.value ?? "");
+    if (flags.length === 1 && flags[0] === "-l") return;
+    acc.protect("CP-SELF-004", "changes scheduled jobs (crontab)");
+    return;
+  }
   if (lower === "rsync") return rsync(args, c);
   if (NET.has(lower)) return network(lower, args, c);
   if (["docker", "podman"].includes(lower)) return docker(args, c);
@@ -634,8 +659,19 @@ function interpreter(lower: string, args: WordInfo[], c: Ctx2): void {
       acc.protect(lowerCode.includes(".key") || lowerCode.includes("device") ? "CP-SELF-002" : "CP-SELF-001", "inline code refers to a protected agent or Glassbox file");
       return;
     }
-    const v = analyzeInlineCode(code.value);
+    // Module flags (perl -MLWP::Simple, ruby -rnet/http) count as part of the code.
+    const modules = args.filter((a) => a.value !== null && (/^-M./.test(a.value) || /^-r[a-z]/.test(a.value))).map((a) => (a.value as string).slice(2));
+    const v = analyzeInlineCode(modules.length > 0 ? `${code.value} ${modules.join(" ")}` : code.value);
     if (v.unanalyzable) { acc.unanalyzable(v.unanalyzable); return; }
+    // Spec rev 6, Q3: what the code is aimed at.
+    if (v.network) { acc.tag("high-risk", "net.egress"); acc.network = true; }
+    if (v.sensitive) { acc.sensitive.push("credentials or environment in inline code"); acc.sensitiveArgs = true; }
+    // A tree delete aimed at home or the root destroys data (same bar as rm -rf ~); a tree
+    // delete of a named folder like 'build' stays at the ordinary delete level.
+    if (v.destroysTree && v.homeOrRoot) {
+      acc.tag("high-risk", "fs.destroy");
+      acc.find("CP-ACTION-001", "inline code deletes the home directory or the filesystem root");
+    }
     if (v.dangerous) { acc.raise("high-risk"); acc.reason("inline code deletes files, uses the network or runs processes"); if (/\b(requests|urllib|http|fetch|socket|axios|httpx)\b/.test(code.value)) { acc.tags.add("net.egress"); acc.network = true; } else acc.tags.add("fs.delete"); }
     return;
   }
@@ -673,7 +709,7 @@ function protectedText(text: string, pctx: PathCtx): boolean {
 function projectTool(rest: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   const h = rest[0];
   if (!h || h.value === null) { c.acc.unanalyzable("package runner with a non-literal package"); return; }
-  const n = h.value.replace(/@[^/]*$/, "").split("/").pop() ?? "";
+  const n = (() => { const v = h.value as string; const slash = v.lastIndexOf("/"); const at = v.indexOf("@", slash + 1); return (at >= 0 ? v.slice(0, at) : v).split("/").pop() ?? ""; })();
   if (PROJECT.has(n) || READ.has(n)) { c.acc.tag("write-reversible", "exec.project-code"); return; }
   if (unwrapDepth < 4 && (n === "rimraf" || n === "del-cli")) { c.acc.tag("high-risk", "fs.delete"); return; }
   c.acc.tag("write-reversible", "exec.project-code");

@@ -14,6 +14,16 @@ export function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/**
+ * Removes trailing characters in `chars`. Linear time: a regex like /[. ]+$/ backtracks
+ * quadratically in V8 on a long run that isn't at the end (a 120 KB path took 27 s).
+ */
+export function trimEndChars(s: string, chars: string): string {
+  let e = s.length;
+  while (e > 0 && chars.includes(s[e - 1] as string)) e--;
+  return e === s.length ? s : s.slice(0, e);
+}
+
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }

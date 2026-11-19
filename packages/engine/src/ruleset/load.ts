@@ -59,6 +59,13 @@ export function validateRules(payload: RulesetPayload): string[] {
       const m = stack.pop();
       if (!m) continue;
       if (m.type === "regex" && !isValidPattern(m.flags === "i" ? `(?i)${m.pattern}` : m.pattern)) errors.push(`${r.id}: regex doesn't compile in the linear engine`);
+      if (m.type === "regex" && m.anchors) {
+        for (const a of m.anchors) {
+          if (a !== a.toLowerCase()) errors.push(`${r.id}: anchor ${JSON.stringify(a)} isn't lowercase`);
+          if ([...a].some((ch) => ch === "\u03a3" || ch === "\u03c3" || ch === "\u03c2")) errors.push(`${r.id}: anchor ${JSON.stringify(a)} contains a Greek sigma (context-dependent lowercase)`);
+          if (m.flags === "i" && [...a].some((ch) => ch < " " || ch > "~")) errors.push(`${r.id}: non-ASCII anchor ${JSON.stringify(a)} on a case-insensitive regex`);
+        }
+      }
       if (m.type === "phrase" && m.phrases.length === 0) errors.push(`${r.id}: empty phrase list`);
       if (m.type === "all" || m.type === "any") stack.push(...m.of);
       if (m.type === "not") stack.push(m.of);

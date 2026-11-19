@@ -1,7 +1,7 @@
 // PowerShell analysis (engine-spec §7.4, rev 3/4): hand-written tokenizer, alias table,
 // cmdlet classes; native programs go through the §7.3 command table.
 import { Acc } from "./acc.js";
-import { isProtected, isProtectedRead, normalizePath, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
+import { isProtected, isProtectedRead, normalizePath, persistenceLabel, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
@@ -51,6 +51,12 @@ const UNANALYZABLE = new Map([
   ["enter-pssession", "Enter-PSSession opens a remote session"], ["add-type", "Add-Type compiles code"], ["start-job", "Start-Job runs code in the background"],
   ["invoke-item", "Invoke-Item opens files with their default program"], ["import-module", "Import-Module loads code"], ["new-module", "New-Module defines code at run time"],
 ]);
+// Destructive system cmdlets (bench gap). Disk/partition wipes destroy data outright.
+const DISK_WIPE = new Set(["format-volume", "clear-disk", "initialize-disk", "remove-partition", "remove-physicaldisk", "remove-virtualdisk", "remove-storagepool", "clear-recyclebin"]);
+// Power and service state: irreversible for the session, so they ask.
+const SYSTEM_STATE = new Set(["stop-computer", "restart-computer", "suspend-computer", "stop-service", "remove-service", "disable-computerrestore", "checkpoint-computer_off"]);
+// Evidence and defence tampering.
+const TAMPER = new Set(["clear-eventlog", "remove-eventlog", "limit-eventlog", "set-mppreference", "add-mppreference", "remove-mppreference", "disable-localuser", "remove-localuser", "remove-localgroupmember"]);
 const STATIC_OK = /^\[(system\.)?(io\.path|math)\]::/i;
 
 const isWordChar = (c: string) => !" \t\r\n;|&(){}<>'\"`,=".includes(c);
@@ -232,12 +238,21 @@ export function analyzePowerShell(src: string, st: PsState): Acc {
   // Split into statements and pipeline elements.
   const cwd = { cwd: st.pctx.cwd };
   let element: Tok[] = [];
-  const flush = () => { if (element.length) analyzeElement(element, st, acc, cwd); element = []; };
+  let upstream: Tok[] | null = null; // the previous element when the current one is piped into
+  let pipedNext = false;
+  const flush = (sep: string) => {
+    if (element.length) analyzeElement(element, st, acc, cwd, pipedNext ? upstream : null);
+    upstream = element.length ? element : null;
+    pipedNext = sep === "|";
+    element = [];
+  };
   for (const t of toks) {
-    if (t.k === "op" && (t.v === ";" || t.v === "|")) { flush(); continue; }
+    if (t.k === "op" && (t.v === ";" || t.v === "|")) { flush(t.v); continue; }
     element.push(t);
   }
-  flush();
+  flush(";");
+  // Same correlation as bash: a sensitive file and a network call in one command.
+  if (acc.network && (acc.sensitiveArgs || acc.envDump)) acc.find("CP-EXFIL-030", "sensitive file or environment and a network call in one command");
   return acc;
 }
 
@@ -249,6 +264,21 @@ function inner(src: string, st: PsState, acc: Acc, commandPosition: boolean, all
   if (a.level === "high-risk" || a.sensitive.length > 0) { for (const t of a.tags) acc.tags.add(t); acc.unanalyzable("subexpression runs a dangerous command"); return; }
   if (a.tags.has("exec.unknown") || a.tags.has("exec.project-code") || a.tags.has("exec.inline-code")) { acc.unanalyzable("subexpression runs an unknown command"); return; }
   if (a.level === "write-reversible") { if (!allowWrite) acc.raise("write-reversible"); for (const t of a.tags) acc.tags.add(t); }
+}
+
+/**
+ * A recursive delete of this path destroys data a user can't easily get back: a drive or
+ * filesystem root, the home directory, everything in it (home/*), or a folder directly under it
+ * (Documents, Desktop, .ssh, a whole project). Deeper paths (node_modules, dist) don't count.
+ */
+function destroysTopLevel(path: string | null, pctx: PathCtx): boolean {
+  if (path === null) return false;
+  const home = normalizePath("~", pctx).path ?? "";
+  const lp = path.toLowerCase(), lh = home.toLowerCase();
+  if (/^[a-z]:\/?\*?$/i.test(path) || path === "/" || path === "/*") return true;
+  if (lh !== "" && (lp === lh || lp === lh + "/")) return true;
+  if (lh !== "" && lp.startsWith(lh + "/")) return !lp.slice(lh.length + 1).replace(/\/$/, "").includes("/");
+  return false;
 }
 
 function tokText(t: Tok | null | undefined): { value: string | null; pathValue: string | null } {
@@ -304,7 +334,7 @@ function positional(el: Tok[]): Tok[] {
   return out;
 }
 
-function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | null }): void {
+function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | null }, upstream: Tok[] | null = null): void {
   const pctx: PathCtx = { ...st.pctx, cwd: cwd.cwd };
   // Destinations of copy/move/write cmdlets are writes, not sensitive reads.
   const head0 = el[0];
@@ -422,17 +452,34 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
   }
   if (cmdlet === "remove-item" || cmdlet === "clear-content" || cmdlet === "clear-item") {
     acc.tag("high-risk", "fs.delete");
-    const recurse = hasParam(params, "-Recurse");
-    const home = normalizePath("~", pctx).path;
-    for (const t of pathTargets()) {
+    let recurse = hasParam(params, "-Recurse");
+    let targets = pathTargets();
+    let narrowed = false;
+    if (targets.length === 0 && upstream) {
+      // `Get-ChildItem <path> [-Recurse] | Remove-Item`: the items come from the upstream path.
+      const up = upstream[0];
+      const upName = up?.k === "word" ? (ALIASES.get(up.v.toLowerCase()) ?? up.v.toLowerCase()) : "";
+      if (upName !== "get-childitem" && upName !== "get-item") { acc.unanalyzable("deletes whatever an earlier pipeline stage produces"); return; }
+      const upParams = upstream.filter((t) => t.k === "param");
+      const upTargets = [paramValue(upstream, "-Path"), paramValue(upstream, "-LiteralPath"), ...positional(upstream)].filter((x) => x !== null);
+      // A filter or a wildcard narrows what is deleted: not a whole-folder delete.
+      narrowed = hasParam(upParams, "-Filter") || hasParam(upParams, "-Include") || upTargets.some((t) => /[*?]/.test(tokText(t).pathValue ?? ""));
+      targets = upTargets.length > 0 ? upTargets : [{ k: "word", v: ".", dyn: false, pathish: "." }];
+      recurse ||= hasParam(upParams, "-Recurse");
+    }
+    for (const t of targets) {
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("deletes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "deletes a file that controls the agent or Glassbox");
-      const isRoot = p.path !== null && (/^[a-z]:\/?$/i.test(p.path) || p.path === "/" || p.path === home);
-      if (recurse && isRoot) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", "deletes a whole drive or home directory"); }
+      const persist = persistenceLabel(p, pctx);
+      if (persist) acc.protect("CP-SELF-004", `deletes a ${persist}`);
+      if (recurse && !narrowed && destroysTopLevel(p.path, pctx)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", "deletes a whole drive, the home directory or a top-level folder in it"); }
     }
     return;
   }
+  if (DISK_WIPE.has(cmdlet)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", `${cmdlet} erases a disk, partition or the recycle bin`); return; }
+  if (SYSTEM_STATE.has(cmdlet)) { acc.tag("high-risk", "infra.change"); acc.reason(`${cmdlet} changes the machine's power or service state`); return; }
+  if (TAMPER.has(cmdlet)) { acc.tag("high-risk", "perm.change"); acc.reason(`${cmdlet} changes logs, Defender settings or accounts`); return; }
   if (WRITE.has(cmdlet)) {
     acc.tag("write-reversible", cmdlet === "move-item" || cmdlet === "rename-item" ? "fs.move" : "fs.write");
     const targets = pathTargets();
@@ -441,6 +488,8 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("writes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
+      const persist = persistenceLabel(p, pctx);
+      if (persist) acc.protect("CP-SELF-004", `changes a ${persist}`);
       const lp = (p.path ?? "").toLowerCase();
       if (lp.endsWith("profile.ps1") || lp.includes("/.git/hooks/")) acc.tag("high-risk", "config.agent");
     }

@@ -60,3 +60,18 @@ describe("hard stop: checkToolCall and checkServerRequest", () => {
     expect(d.degraded).toBe(true);
   });
 });
+
+describe("regex backtracking can't stall the gate (ReDoS)", () => {
+  // Found by the recheck test: /[. ]+$/ on a path segment was quadratic in V8. A 120 KB path
+  // argument took 27 s, and the time backstop can't interrupt a running regex.
+  it("a 120 KB path of '. ' runs is checked in well under a second", () => {
+    const d = checkToolCall({ serverId: "fs", toolName: "write_file", arguments: { path: "/x/" + ". ".repeat(60_000) + "a", content: "x" } }, ctx());
+    expect(d.elapsedMs).toBeLessThan(1000);
+  });
+
+  it("the same on Windows paths", () => {
+    const win = ctx({ platform: "win32", homeDir: "C:/Users/u", cwd: "C:/Users/u/proj", caseInsensitiveFs: true, glassboxDirs: ["C:/Users/u/.glassbox"] });
+    const d = checkToolCall({ serverId: "fs", toolName: "write_file", arguments: { path: "C:/x/" + ". ".repeat(60_000) + "a", content: "x" } }, win);
+    expect(d.elapsedMs).toBeLessThan(1000);
+  });
+});
