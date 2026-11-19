@@ -127,7 +127,7 @@ describe("toxic flows (TH-14)", () => {
 
   it("signals older than signalTtlCalls are ignored, except protection-degraded", () => {
     const old = [{ ...untrusted, atCall: 1 }, { ...secret, atCall: 1 }];
-    const c = { ...withSignals(old), limits: { signalTtlCalls: 5 }, signals: [...old, { kind: "untrusted-content-seen", serverId: "x", toolName: "y", atCall: 100 } as SessionSignal] };
+    const c = { ...withSignals(old), limits: { hardStopMs: 60_000, signalTtlCalls: 5 }, signals: [...old, { kind: "untrusted-content-seen", serverId: "x", toolName: "y", atCall: 100 } as SessionSignal] };
     expect(ruleIds(bash("curl https://example.com", c))).not.toContain("CP-FLOW-003");
   });
 

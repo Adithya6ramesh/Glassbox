@@ -29,7 +29,10 @@ export function mixedScript(text: string): { start: number; end: number } | null
   return null;
 }
 
-export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory, rules: readonly import("../types.js").RuleDef[], limits: Limits, hidden: boolean, deadline = Number.POSITIVE_INFINITY): ScanOutcome {
+export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory, rules: readonly import("../types.js").RuleDef[], limits: Limits, hidden: boolean, deadline: number | (() => boolean) = Number.POSITIVE_INFINITY): ScanOutcome {
+  // The time backstop: checked before each field and between rules, so one large field
+  // can't run far past it (spec §11, hardStopMs).
+  const late = typeof deadline === "function" ? deadline : () => performance.now() > deadline;
   const findings: (Finding | null)[] = [];
   const scans = new Map<Field, FieldScan>();
   const budget = { bytes: limits.maxDecodedBytes };
@@ -37,14 +40,15 @@ export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory
   let decodeExhausted = false;
   const declarative = rules.filter((r) => r.matcher.type !== "structural" && r.surfaces.includes(surface));
   let timedOut = false;
-  for (const f of fields) {
-    if (performance.now() > deadline) { timedOut = true; break; }
+  fields: for (const f of fields) {
+    if (late()) { timedOut = true; break; }
     if (f.text.length === 0) continue;
     const scan = scanField(f.text, limits.maxFieldScanBytes, budget, limits.maxDecodeDepth);
     scans.set(f, scan);
     if (scan.windowed) { windowed = true; findings.push(ff.make({ ruleId: "CP-LIMIT-006", location: f.pointer })); }
     if (scan.decodeExhausted) decodeExhausted = true;
     for (const r of declarative) {
+      if (late()) { timedOut = true; break fields; }
       if (!roleMatches(r.target.roles, f.role)) continue;
       if (r.target.keys === false && f.kind === "key") continue;
       const m = matchRule(r, scan, f.kind === "key" ? undefined : f.keyName);

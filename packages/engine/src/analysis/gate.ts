@@ -23,6 +23,16 @@ import { scanFields } from "./scan.js";
 
 const now = (): number => performance.now();
 
+/**
+ * The gate's time backstop (spec §11, hardStopMs): true once this call has run longer than
+ * the limit, not counting one-time initialization (regex compiles, tables), which the first
+ * call in a process pays and later calls don't.
+ */
+function overdue(t0: number, hardStopMs: number): () => boolean {
+  const init0 = initMs();
+  return () => now() - t0 - (initMs() - init0) > hardStopMs;
+}
+
 export const HIGH_RISK_UNKNOWN: ActionRisk = Object.freeze({ level: "high-risk", tags: Object.freeze(["exec.unknown"]) as readonly ActionTag[], unanalyzable: false, selfProtection: false, reasons: Object.freeze(["the action couldn't be classified"]) as readonly string[] });
 
 // ── Context validation ───────────────────────────────────────────────────
@@ -221,7 +231,7 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   const risk = riskOf(acc);
 
   // Layer 1 on the arguments.
-  const scan = scanFields(callFields(call), "call", ff, c.ruleset.rules, c.limits, true);
+  const scan = scanFields(callFields(call), "call", ff, c.ruleset.rules, c.limits, true, overdue(t0, c.limits.hardStopMs));
   const findings: (Finding | null)[] = [...issueFs, ...scan.findings, ...integrityFindings(c, ff)];
   const cmdText = getString(args, "command") ?? getString(args, "query") ?? "";
   for (const cf of acc.findings) {
@@ -263,7 +273,7 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   if (scan.windowed) degradedReasons.push("CP-LIMIT-006");
   if (scan.decodeExhausted) { degradedReasons.push("CP-LIMIT-007"); findings.push(ff.make({ ruleId: "CP-LIMIT-007", location: "" })); }
   // One-time initialization (regex compiles, tables) doesn't count against the backstop.
-  if (now() - t0 - (initMs() - init0) > c.limits.hardStopMs) { degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
+  if (scan.timedOut || now() - t0 - (initMs() - init0) > c.limits.hardStopMs) { degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
 
   let fs = dedupe(findings);
   const sup = suppress(fs, c, ff);
@@ -332,7 +342,8 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
   const risk = riskOf(acc);
 
   const fields = genericFields(result, "/result", "result.text", "result.key").filter((f) => f.kind === "string");
-  const scan = scanFields(fields, "result", ff, c.ruleset.rules, c.limits, true);
+  const late = overdue(t0, c.limits.hardStopMs);
+  const scan = scanFields(fields, "result", ff, c.ruleset.rules, c.limits, true, late);
   const findings: (Finding | null)[] = [...issueFs, ...scan.findings, ...integrityFindings(c, ff)];
 
   // CP-INJECT-020: a session tool named next to directive language.
@@ -344,7 +355,10 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
     for (const n of [s.serverId, ...(s.identity?.issuerTags ?? [])]) if (typeof n === "string" && n.length >= 4) sessionTools.set(n, false);
   }
   const mentioned = new Set<string>();
-  for (const f of fields) {
+  // After a timeout, only fields the scan reached are examined (empty fields are never
+  // scanned and can't match, so without a timeout this is every field).
+  const reached = fields.filter((f) => scan.scans.has(f));
+  for (const f of reached) {
     const words = tokenize(f.text.slice(0, c.limits.maxFieldScanBytes));
     const lowerWords = new Set(words.map((w) => w.w.toLowerCase()));
     const directive = [...DIRECTIVES].some((d) => lowerWords.has(d));
@@ -361,6 +375,7 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
   if (ink.degraded) degradedReasons.push(...new Set(ink.issues.map((i) => i.code)));
   if (scan.windowed) degradedReasons.push("CP-LIMIT-006");
   if (scan.decodeExhausted) degradedReasons.push("CP-LIMIT-007");
+  if (scan.timedOut || late()) { degradedReasons.push("CP-LIMIT-010"); findings.push(ff.make({ ruleId: "CP-LIMIT-010", location: "" })); }
   let fs = dedupe(findings);
   const sup = suppress(fs, c, ff);
   fs = capFindings(sup.kept, c, ff).findings;
@@ -371,11 +386,15 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
   const signals: SessionSignal[] = [];
   const injected = fs.some((f) => f.ruleId.startsWith("CP-INJECT-") && sevRank(f.severity) >= 3);
   if (injected) {
-    for (const f of fields) for (const name of sessionTools.keys()) if (f.text.includes(name)) mentioned.add(name);
+    for (const f of reached) for (const name of sessionTools.keys()) if (f.text.includes(name)) mentioned.add(name);
     signals.push({ kind: "injection-seen", serverId, mentionedTools: [...mentioned].sort(), atCall: at });
   }
   const secretTypes = new Set<string>();
-  for (const f of fields) for (const s of detectSecrets(f.text.slice(0, c.limits.maxFieldScanBytes), f.keyName)) if (!s.example) secretTypes.add(s.type);
+  for (const f of reached) {
+    // Reuse the scan's secret results when the field was scanned whole (same text, same key).
+    const memo = scan.scans.get(f)?.windowed === false ? scan.scans.get(f)?.secrets : undefined;
+    for (const s of detectSecrets(f.text.slice(0, c.limits.maxFieldScanBytes), f.keyName, memo)) if (!s.example) secretTypes.add(s.type);
+  }
   for (const t of secretTypes) signals.push({ kind: "secret-seen", secretType: t, atCall: at });
   const untrusted = serverId !== "builtin" || UNTRUSTED_BUILTINS.has(toolName) || risk.tags.includes("net.egress") || degraded || injected;
   if (untrusted) signals.push({ kind: "untrusted-content-seen", serverId, toolName, atCall: at });
@@ -438,7 +457,10 @@ export function checkServerRequestImpl(input: unknown, ctxIn: SessionContext, t0
   } else {
     fields.push(...genericFields(params, "/message/params", "srvreq.other", "srvreq.key").filter((f) => f.kind === "string"));
   }
-  const scan = scanFields(fields, "server-request", ff, c.ruleset.rules, c.limits, false);
+  const late = overdue(t0, c.limits.hardStopMs);
+  const scan = scanFields(fields, "server-request", ff, c.ruleset.rules, c.limits, false, late);
+  const timeFinding = scan.timedOut || late() ? ff.make({ ruleId: "CP-LIMIT-010", location: "" }) : null;
+  if (timeFinding) scan.findings.push(timeFinding);
   const findings: (Finding | null)[] = [...issueFindings(ink.issues, ff), ...scan.findings, ...integrityFindings(c, ff)];
   if (kind === "sampling") {
     const inc = getString(params, "includeContext");
@@ -462,7 +484,7 @@ export function checkServerRequestImpl(input: unknown, ctxIn: SessionContext, t0
   const sup = suppress(fs, c, ff);
   fs = capFindings(sup.kept, c, ff).findings;
   const risk: ActionRisk = kind === "sampling" || kind === "elicitation" ? { level: "high-risk", tags: ["exec.unknown"], unanalyzable: false, selfProtection: false, reasons: [`server request: ${kind}`] } : { level: "read", tags: [], unanalyzable: false, selfProtection: false, reasons: [`server request: ${kind}`] };
-  const degraded = ink.degraded || scan.windowed;
+  const degraded = ink.degraded || scan.windowed || scan.timedOut;
   const out = decide({
     kind: "server-request", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
     minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName: method, remembered: [], requestVerdict: { verdict: choice as Verdict, locked },

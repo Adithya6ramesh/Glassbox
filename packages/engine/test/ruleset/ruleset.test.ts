@@ -126,7 +126,7 @@ describe("I17: protection-degraded (Q9)", () => {
 
   it("the signal persists: a later call with a clean ruleset is still protection-degraded", () => {
     const sig = bash("ls", c("balanced")).signals.filter((s) => s.kind === "protection-degraded");
-    const later = bash("curl https://example.com", ctx({ signals: sig.map((s) => ({ ...s, atCall: 1 })), limits: { signalTtlCalls: 1 } }));
+    const later = bash("curl https://example.com", ctx({ signals: sig.map((s) => ({ ...s, atCall: 1 })), limits: { hardStopMs: 60_000, signalTtlCalls: 1 } }));
     expect(later.protectionDegraded).toBe(true);
     expect(later.verdict).toBe("ask");
   });

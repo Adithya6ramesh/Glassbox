@@ -24,6 +24,11 @@ export function ctx(overrides: Partial<SessionContext> = {}): SessionContext {
     servers: [],
     policy: { mode: "balanced" },
     ruleset: EMBEDDED_BASELINE,
+    // The wall-clock backstop (hardStopMs, default 100) makes a verdict depend on machine
+    // speed: a cold first call on a busy CI runner once crossed it and turned an `allow`
+    // into a `warn` (the Step 5/6 flake). Classification tests use a generous limit; the
+    // backstop itself is tested with explicit limits in test/gate/hard-stop.test.ts.
+    limits: { hardStopMs: 60_000 },
     ...overrides,
   };
 }
