@@ -1,5 +1,6 @@
 // Accumulator for action classification results (shared by shell, PowerShell, SQL, tools).
 import type { ActionRiskLevel, ActionTag } from "../types.js";
+import { JOB_LABEL, type JobKind, type ScheduledJob } from "./schedule.js";
 
 export interface CodeFinding { ruleId: string; note?: string }
 
@@ -19,6 +20,10 @@ export class Acc {
   newRemotes: string[] = [];
   /** Local files this command uploads, by kind (upload.ts). */
   uploads: ("sensitive" | "outside" | "project")[] = [];
+  /** Scheduled jobs this command creates, changes or removes (schedule.ts). */
+  scheduledJobs: ScheduledJob[] = [];
+  /** Normalized paths this command writes, moves or deletes. */
+  writes: string[] = [];
   pushedTo: string[] = [];
   /** Paths read that are sensitive (for signals); labels only. */
 
@@ -47,13 +52,32 @@ export class Acc {
   }
 
   /** A write or delete of a persistence location: protected (deny) or a CP-SELF-005 ask. */
-  persist(hit: { kind: "deny" | "ask"; label: string } | null, verb: "changes" | "deletes"): void {
+  persist(hit: { kind: "deny" | "ask" | "job"; label: string; job?: JobKind } | null, verb: "changes" | "deletes", path: string | null = null): void {
     if (hit === null) return;
     const why = `${verb} a ${hit.label}`;
     if (hit.kind === "deny") { this.protect("CP-SELF-004", why); return; }
+    if (hit.kind === "job" && hit.job) {
+      // The job file itself is recorded: it runs (Startup folder, cron.daily, init.d) or defines the job.
+      this.scheduleJob({ kind: hit.job, verb: verb === "deletes" ? "removes" : "changes", path, schedule: null, files: verb === "deletes" || path === null ? [] : [path] });
+      return;
+    }
     this.tag("high-risk", "config.agent");
     this.find("CP-SELF-005", why);
     this.reason(why);
+  }
+
+  /** Creating, changing or removing a scheduled job: CP-SELF-006 (ask; deny in autopilot). */
+  scheduleJob(job: ScheduledJob): void {
+    this.tag("high-risk", "infra.change");
+    const why = `${job.verb} a ${JOB_LABEL[job.kind]}`;
+    this.find("CP-SELF-006", why);
+    this.reason(why);
+    if (this.scheduledJobs.length < 20) this.scheduledJobs.push(job);
+  }
+
+  /** A path this command writes, moves or deletes (for CP-SELF-007). */
+  wrote(path: string | null): void {
+    if (path !== null && this.writes.length < 200 && !this.writes.includes(path)) this.writes.push(path);
   }
 
   find(ruleId: string, note?: string): void {
@@ -77,6 +101,8 @@ export class Acc {
     this.envDump ||= o.envDump;
     this.newRemotes.push(...o.newRemotes);
     this.uploads.push(...o.uploads);
+    for (const j of o.scheduledJobs) if (this.scheduledJobs.length < 20) this.scheduledJobs.push(j);
+    for (const w of o.writes) this.wrote(w);
     this.pushedTo.push(...o.pushedTo);
   }
 

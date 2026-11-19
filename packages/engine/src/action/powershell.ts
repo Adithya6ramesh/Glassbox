@@ -5,6 +5,7 @@ import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceH
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { allLoopback, classifyUpload, recordUpload } from "./upload.js";
+import { commandFiles } from "./schedule.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
 
 class PsUnanalyzable extends Error {
@@ -471,13 +472,28 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("deletes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "deletes a file that controls the agent or Glassbox");
-      acc.persist(persistenceHit(p, pctx), "deletes");
+      acc.persist(persistenceHit(p, pctx), "deletes", p.path);
+      acc.wrote(p.path);
       if (recurse && !narrowed && destroysTopLevel(p.path, pctx)) { acc.tag("high-risk", "fs.destroy"); acc.find("CP-ACTION-001", "deletes a whole drive, the home directory or a top-level folder in it"); }
     }
     return;
   }
-  if (cmdlet === "register-scheduledtask" || cmdlet === "register-scheduledjob" || cmdlet === "new-service") {
-    acc.protect("CP-SELF-004", `${cmdlet} installs a task or service that runs later`);
+  // Scheduled tasks and services (rev 9): ask with the schedule and the command (CP-SELF-006).
+  // Register-ScheduledTask's action and trigger are usually built earlier in the script; the
+  // gate reads them from the whole command (psTaskJob).
+  if (cmdlet === "register-scheduledtask" || cmdlet === "register-scheduledjob" || cmdlet === "set-scheduledtask") {
+    acc.scheduleJob({ kind: "task-scheduler", verb: cmdlet === "set-scheduledtask" ? "changes" : "creates", path: null, schedule: null, files: [] });
+    return;
+  }
+  if (cmdlet === "unregister-scheduledtask" || cmdlet === "unregister-scheduledjob") {
+    acc.scheduleJob({ kind: "task-scheduler", verb: "removes", path: null, schedule: null, files: [] });
+    return;
+  }
+  if (cmdlet === "new-service" || cmdlet === "set-service" && hasParam(params, "-StartupType")) {
+    const bin = paramValue(el, "-BinaryPathName");
+    const start = paramValue(el, "-StartupType");
+    const binText = bin ? tokText(bin).value : null;
+    acc.scheduleJob({ kind: "service", verb: cmdlet === "new-service" ? "creates" : "changes", path: null, schedule: start ? `startup type ${tokText(start).value ?? "?"}` : "as a Windows service", files: binText ? commandFiles(binText) : [] });
     return;
   }
   if (cmdlet === "clear-history" || (cmdlet === "set-psreadlineoption" && (hasParam(params, "-AddToHistoryHandler") || /savenothing/i.test(el.map((t) => tokText(t).value ?? "").join(" "))))) {
@@ -496,7 +512,8 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       const p = np(t, pctx);
       if (p === null) { acc.unanalyzable("writes a path that isn't known statically"); continue; }
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
-      acc.persist(persistenceHit(p, pctx), "changes");
+      acc.persist(persistenceHit(p, pctx), "changes", p.path);
+      acc.wrote(p.path);
       const lp = (p.path ?? "").toLowerCase();
       if (lp.endsWith("profile.ps1") || lp.includes("/.git/hooks/")) acc.tag("high-risk", "config.agent");
     }

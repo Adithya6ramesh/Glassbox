@@ -54,7 +54,12 @@ export type SessionSignal =
   | { kind: "private-data-read"; source: string; serverId: string; toolName: string; atCall: number }
   | { kind: "untrusted-content-seen"; serverId: string; toolName: string; atCall: number }
   | { kind: "external-write"; serverId: string; toolName: string; tags: readonly ActionTag[]; atCall: number }
-  | { kind: "protection-degraded"; reason: "tampered" | "downgrade" | "internal-error"; atCall: number };
+  | { kind: "protection-degraded"; reason: "tampered" | "downgrade" | "internal-error"; atCall: number }
+  /**
+   * A scheduled job created or changed by this call, and the files it runs (rev 9). Keep it only
+   * if the call was approved and ran; it doesn't expire. Later edits of these files ask (CP-SELF-007).
+   */
+  | { kind: "scheduled-job"; job: "cron" | "systemd" | "at" | "launchd" | "autostart" | "startup-folder" | "task-scheduler" | "service" | "boot-script"; schedule: string | null; files: readonly string[]; atCall: number };
 
 export interface Decision {
   verdict: Verdict;
