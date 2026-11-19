@@ -29,6 +29,13 @@ describe.runIf(bash !== undefined)("T-DIFF: shell parser vs real bash", () => {
     expect(r.executed).toEqual([["rm", "-rf", "/"], ["echo", "a b", "cA"]]);
   });
 
+  it("harness: an argument with a newline survives a stdout redirect (stress-run finding)", async () => {
+    // Found by the random-seed stress job: the log was truncated at the newline and the
+    // next record's count was read as part of this argument ("a\n4").
+    const r = await runInBash(bash!, "cp 'a\nb' 'x\x01y' &> out; printf -rf 2>&1");
+    expect(r.executed).toEqual([["cp", "a\nb", "x\x01y"], ["printf", "-rf"]]);
+  });
+
   it("matcher: null parser words match zero or more words", () => {
     expect(viewCovers([["echo", null, "x"]], ["echo", "x"])).toBe(true);
     expect(viewCovers([["echo", null, "x"]], ["echo", "a", "b", "x"])).toBe(true);

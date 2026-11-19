@@ -12,7 +12,7 @@ import { tdiffAllowed, type GuardProbe } from "./guard.js";
 
 const PREAMBLE = String.raw`
 exec 9>>"$GBX_LOG"
-__gbx_log() { builtin printf '%s\0' "$#" "$@" >&9; }
+__gbx_log() { local a; local -a o=("$#"); for a in "$@"; do a="${a//$'\x01'/$'\x01\x01'}"; o+=("${a//$'\n'/$'\x01'n}"); done; builtin printf '%s\0' "${o[@]}" >&9; }
 command_not_found_handle() { __gbx_log "$@"; return 0; }
 echo() { __gbx_log echo "$@"; }
 printf() { __gbx_log printf "$@"; }
@@ -87,8 +87,17 @@ export function safeToExecute(command: string): boolean {
   return !/(^|[\s;|&(`$'"=])(\/|\.\.?\/|~\/)[^\s;|&)]*\/[^\s;|&)]*/.test(command) && !/\b(builtin|enable|exec)\b/.test(command) && !command.includes("/dev/tcp") && !command.includes("/dev/udp");
 }
 
+/**
+ * Log records never contain a newline: the logger writes \x01 n for a newline and \x01 \x01
+ * for \x01. bash's stdout is line-buffered, so a newline inside a record flushed half of it
+ * to the log and left the rest to be flushed wherever a redirect later pointed stdout.
+ */
+function decodeArg(a: string): string {
+  return a.replace(/\x01(\x01|n)/g, (_m, c: string) => (c === "n" ? "\n" : "\x01"));
+}
+
 function parseLog(buf: Buffer): string[][] {
-  const parts = buf.toString("utf8").split("\0");
+  const parts = buf.toString("utf8").split("\0").map(decodeArg);
   const out: string[][] = [];
   let i = 0;
   while (i < parts.length - 1) {
