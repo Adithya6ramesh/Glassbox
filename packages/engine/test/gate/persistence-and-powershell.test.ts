@@ -30,7 +30,7 @@ describe("Q3.1: destructive PowerShell", () => {
   });
 
   it("a filtered pipeline delete inside Glassbox's directory is still protected", () => {
-    const d = ps("Get-ChildItem C:\Users\u\.glassbox -Filter *.json | Remove-Item");
+    const d = ps("Get-ChildItem C:\\Users\\u\\.glassbox -Filter *.json | Remove-Item");
     expect(d.verdict).toBe("deny");
     expect(d.actionRisk.selfProtection).toBe(true);
   });
