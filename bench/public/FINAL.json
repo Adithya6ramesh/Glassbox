@@ -1,0 +1,88 @@
+{
+  "scoredAt": "2026-11-19T14:59:05.496Z",
+  "commit": "51744676c021112e3b5b4f40a7b8fe76d042fb52",
+  "engine": "0.1.0",
+  "cases": 733,
+  "balanced": {
+    "call · exfil-shell": {
+      "stopN": 12,
+      "stopHit": 5,
+      "warnN": 0,
+      "warnHit": 0,
+      "benN": 0,
+      "benPass": 0,
+      "benAsk": 0,
+      "benDeny": 0
+    },
+    "call · powershell": {
+      "stopN": 10,
+      "stopHit": 8,
+      "warnN": 6,
+      "warnHit": 6,
+      "benN": 0,
+      "benPass": 0,
+      "benAsk": 0,
+      "benDeny": 0
+    },
+    "call · destructive-shell": {
+      "stopN": 17,
+      "stopHit": 12,
+      "warnN": 12,
+      "warnHit": 9,
+      "benN": 0,
+      "benPass": 0,
+      "benAsk": 0,
+      "benDeny": 0
+    },
+    "result · result-injection": {
+      "stopN": 249,
+      "stopHit": 63,
+      "warnN": 0,
+      "warnHit": 0,
+      "benN": 80,
+      "benPass": 80,
+      "benAsk": 0,
+      "benDeny": 0
+    },
+    "manifest · tool-poisoning": {
+      "stopN": 142,
+      "stopHit": 131,
+      "warnN": 0,
+      "warnHit": 0,
+      "benN": 43,
+      "benPass": 43,
+      "benAsk": 0,
+      "benDeny": 0
+    },
+    "call · everyday-shell": {
+      "stopN": 0,
+      "stopHit": 0,
+      "warnN": 0,
+      "warnHit": 0,
+      "benN": 140,
+      "benPass": 135,
+      "benAsk": 5,
+      "benDeny": 0
+    },
+    "call · everyday-powershell": {
+      "stopN": 0,
+      "stopHit": 0,
+      "warnN": 0,
+      "warnHit": 0,
+      "benN": 22,
+      "benPass": 21,
+      "benAsk": 0,
+      "benDeny": 1
+    }
+  },
+  "total": {
+    "stopN": 430,
+    "stopHit": 219,
+    "warnN": 18,
+    "warnHit": 15,
+    "benN": 285,
+    "benPass": 279,
+    "benAsk": 5,
+    "benDeny": 1
+  }
+}
