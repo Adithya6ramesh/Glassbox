@@ -15,6 +15,9 @@ export class Acc {
   sensitiveArgs = false;
   /** Prints the whole environment (env, printenv, set, export -p): harmless alone, exfiltration next to a network call. */
   envDump = false;
+  /** Git remotes added or repointed in this command, and push destinations (CP-EXFIL-034). */
+  newRemotes: string[] = [];
+  pushedTo: string[] = [];
   /** Paths read that are sensitive (for signals); labels only. */
 
   raise(level: ActionRiskLevel): void {
@@ -70,6 +73,8 @@ export class Acc {
     this.network ||= o.network;
     this.sensitiveArgs ||= o.sensitiveArgs;
     this.envDump ||= o.envDump;
+    this.newRemotes.push(...o.newRemotes);
+    this.pushedTo.push(...o.pushedTo);
   }
 
   get unanalyzableFlag(): boolean {

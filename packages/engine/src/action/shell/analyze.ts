@@ -3,7 +3,7 @@ import { Acc } from "../acc.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
-  coversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
+  coversProtectedRead, homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, suffixOnly, type NormPath, type PathCtx,
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
@@ -145,6 +145,9 @@ export function analyzeScript(script: Script, st: ShellState, acc: Acc): void {
   for (const cmd of script.commands) analyzeSimple(cmd, st, acc, cwdStack, script.functions);
   if (acc.network && acc.sensitiveArgs) acc.find("CP-EXFIL-030", "sensitive file and network call in one command");
   else if (acc.network && acc.envDump) acc.find("CP-EXFIL-030", "environment variables and a network call in one command");
+  if (acc.newRemotes.length > 0 && acc.pushedTo.some((r) => acc.newRemotes.includes(r) || r === "\u0000dynamic" || acc.newRemotes.includes("\u0000dynamic"))) {
+    acc.find("CP-EXFIL-034", "adds or repoints a git remote and pushes to it in the same command");
+  }
 }
 
 function analyzeSubsts(w: WordInfo, st: ShellState, acc: Acc, commandPosition: boolean): void {
@@ -349,6 +352,17 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if ((lower === "printenv" && args.length === 0) || (["set", "export", "declare", "typeset"].includes(lower) && flagsOnly(["-p", "-x", "-px", "-xp"]))) acc.envDump = true;
   if (lower === "compgen" && hasFlag(args, "-e", "-v")) acc.envDump = true;
 
+  // Clearing shell history or system logs hides what happened (warn, CP-ACTION-030).
+  const clearsHistory = (lower === "history" && args.some((a) => /^-[a-z]*c/.test(a.value ?? "") || a.value === "-d")) ||
+    (lower === "unset" && args.some((a) => a.value === "HISTFILE")) ||
+    (lower === "journalctl" && args.some((a) => (a.value ?? "").startsWith("--vacuum") || a.value === "--rotate"));
+  if (clearsHistory) {
+    acc.tag("high-risk", "fs.delete");
+    acc.find("CP-ACTION-030", `${lower} clears shell history or system logs`);
+    acc.reason("clears shell history or logs");
+    return;
+  }
+
   // DNS lookups of a name built from command output or variables: data smuggled out in DNS.
   if (["nslookup", "dig", "host", "drill", "ping", "ping6", "resolvectl", "getent"].includes(lower)) {
     if (operands(args).some((a) => a.substs.length > 0 || a.value === null)) {
@@ -503,6 +517,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if (["psql", "mysql", "sqlite3", "mariadb", "sqlcmd", "duckdb", "clickhouse-client"].includes(lower)) return dbCli(lower, args, c);
 
   // ── Classes from the command table ─────────────────────────────────────
+  if (lower === "redis-cli" || lower === "valkey-cli" || lower === "keydb-cli") {
+    if (args.some((a) => ["flushall", "flushdb"].includes((a.value ?? "").toLowerCase()))) {
+      acc.tag("high-risk", "db.unscoped-write", "db.delete");
+      acc.reason("deletes every key in the Redis database");
+      return;
+    }
+  }
   if (REMOVE.has(lower)) return remove(lower, args, c);
   if (lower === "find") return find(args, c, unwrapDepth);
   if (lower === "dd") {
@@ -530,7 +551,7 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   if (lower === "rsync") return rsync(args, c);
   if (NET.has(lower)) return network(lower, args, c);
   if (["docker", "podman"].includes(lower)) return docker(args, c);
-  if (["kubectl", "helm", "terraform", "tofu", "pulumi", "vercel", "netlify", "fly", "flyctl", "wrangler", "firebase", "heroku", "aws", "gcloud", "az", "doctl", "serverless", "sls", "cdk", "eb", "railway", "render"].includes(lower)) return deploy(lower, args, c);
+  if (["kubectl", "helm", "terraform", "tofu", "pulumi", "vercel", "netlify", "fly", "flyctl", "wrangler", "firebase", "heroku", "aws", "gcloud", "gsutil", "az", "doctl", "serverless", "sls", "cdk", "eb", "railway", "render"].includes(lower)) return deploy(lower, args, c);
   if (["twine", "gem_push"].includes(lower)) { acc.tag("high-risk", "publish.public", "net.egress"); acc.network = true; return; }
   if (lower === "sed") {
     if (!hasFlag(args, "-i", "--in-place")) return;
@@ -742,7 +763,45 @@ function remove(lower: string, args: WordInfo[], c: Ctx2): void {
     const isHome = p !== null && home !== null && (p === home || p === home + "/*");
     const star = raw === "*" || raw === "/*" || raw === "~/*" || raw === "$HOME/*" || raw === "." || raw === "./" || raw === ".." || raw === "./*";
     if ((recursive || raw.endsWith("*")) && (rootLevel || isHome || star || p === "/")) destroy(acc, "deletes a whole filesystem, home directory or project");
+    else if (recursive && isGitDir(p)) destroy(acc, "deletes a repository's .git directory, its whole history");
+    else if (recursive && homeTopLevel(p, pctx)) destroy(acc, "deletes a whole folder in the home directory");
+    if (lower === "shred" && p !== null && !scratch(p, c.st.pctx.cwd)) destroy(acc, "shreds files outside the project, which can't be recovered");
+    if (p !== null && isLogOrHistory(p)) acc.find("CP-ACTION-030", `${lower} on a log or shell history file`);
   }
+}
+
+/** scheme://…, file:… or scp-style user@host:path. String code, not a regex (ReDoS test). */
+function isRepoUrl(d: string): boolean {
+  const l = d.toLowerCase();
+  if (l.startsWith("file:")) return true;
+  const s = l.indexOf("://");
+  if (s > 0 && /^[a-z][a-z0-9+.-]*$/.test(l.slice(0, s))) return true;
+  const at = l.indexOf("@");
+  const colon = l.indexOf(":");
+  return at > 0 && colon > at + 1 && !l.slice(0, at).includes("/");
+}
+
+/** The .git directory of a repository, or everything in it. */
+function isGitDir(p: string | null): boolean {
+  if (p === null) return false;
+  const lp = trimEndChars(p, "/");
+  return lp === ".git" || lp.endsWith("/.git") || lp.endsWith("/.git/*");
+}
+
+/** Inside the session's project directory (not wherever a `cd` went) or a temp directory. */
+function scratch(p: string, cwd: string | null): boolean {
+  const lp = p.toLowerCase();
+  if (lp.startsWith("/tmp/") || lp.startsWith("/var/tmp/") || lp.startsWith("/private/tmp/")) return true;
+  if (cwd === null) return false;
+  const lc = trimEndChars(cwd.toLowerCase(), "/");
+  return lp.startsWith(lc + "/");
+}
+
+/** System logs and shell history files: clearing them hides what happened (warn, CP-ACTION-030). */
+function isLogOrHistory(p: string): boolean {
+  const lp = p.toLowerCase();
+  const base = lp.slice(lp.lastIndexOf("/") + 1);
+  return lp.startsWith("/var/log/") || base.endsWith("_history") || base === ".history" || base === "wtmp" || base === "btmp" || base === "lastlog";
 }
 
 const FIND_NARROWING = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-newer", "-mtime", "-mmin", "-atime", "-amin", "-ctime", "-cmin", "-size", "-user", "-group", "-perm", "-empty", "-links", "-inum", "-samefile", "-lname", "-ilname", "-maxdepth"]);
@@ -858,10 +917,25 @@ function docker(args: WordInfo[], c: Ctx2): void {
   const sub = operands(args, new Set(["-H", "--host", "--context", "-c", "--config", "-l", "--log-level"]))[0]?.value ?? "";
   if (["pull", "login", "search"].includes(sub)) { acc.tag("high-risk", "net.egress"); acc.network = true; return; }
   if (sub === "push") { acc.tag("high-risk", "publish.public", "net.egress"); acc.network = true; return; }
+  const vals = args.map((a) => a.value ?? "");
+  if ((sub === "system" && vals.includes("prune")) || (sub === "volume" && (vals.includes("prune") || vals.includes("rm")))) {
+    acc.tag("high-risk", "fs.destroy", "fs.delete");
+    acc.reason("deletes Docker volumes or all unused data, which can't be recovered");
+    return;
+  }
   if (["rm", "rmi", "prune", "kill"].includes(sub) || args.some((a) => a.value === "prune")) { acc.tag("high-risk", "fs.delete"); return; }
   if (["ps", "images", "inspect", "logs", "version", "info", "stats", "top", "history", "port", "diff"].includes(sub)) return;
   if (sub === "run" && args.some((a) => a.value === "--privileged" || (a.value ?? "").startsWith("-v=/:") || a.value === "-v" )) acc.reason("runs a container with host access");
   acc.tag("write-reversible", "exec.unknown");
+}
+
+/** aws s3 rm --recursive, aws s3 rb --force, gcloud storage rm -r, gsutil rm -r. */
+function cloudBulkDelete(lower: string, vals: string[]): boolean {
+  const recursive = vals.includes("--recursive") || vals.includes("-r") || vals.includes("-R");
+  if (lower === "aws") return vals.includes("s3") && ((vals.includes("rm") && recursive) || (vals.includes("rb") && vals.includes("--force")));
+  if (lower === "gcloud") return vals.includes("storage") && vals.includes("rm") && recursive;
+  if (lower === "gsutil") return vals.includes("rm") && recursive;
+  return false;
 }
 
 function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
@@ -870,6 +944,11 @@ function deploy(lower: string, args: WordInfo[], c: Ctx2): void {
   const vals = args.map((a) => a.value ?? "");
   const sub = operands(args, new Set(["-n", "--namespace", "--context", "--kubeconfig", "--project", "--region", "--profile", "-c", "-f", "--chdir", "-o", "--output"]))[0]?.value ?? "";
   const readSubs = new Set(["get", "describe", "logs", "list", "ls", "show", "status", "plan", "validate", "fmt", "version", "init", "whoami", "config", "top", "explain", "diff", "history", "output", "preview", "info", "inspect", "help", "--version", "-v", "dev", "login"]);
+  if (cloudBulkDelete(lower, vals)) {
+    acc.tag("high-risk", "fs.destroy", "net.egress");
+    acc.reason("deletes cloud storage objects in bulk, which can't be recovered");
+    return;
+  }
   if (lower === "vercel") {
     if (vals.includes("--prod") || vals.includes("--production") || sub === "promote") { acc.tag("high-risk", "deploy.prod", "net.egress"); return; }
     if (["ls", "list", "inspect", "logs", "whoami", "env", "pull", "dev", "build", "link"].includes(sub)) { acc.tag("high-risk", "net.egress"); return; }
@@ -942,6 +1021,10 @@ function git(args: WordInfo[], c: Ctx2): void {
       return;
     }
     case "remote": {
+      if ((rv[0] === "add" || rv[0] === "set-url") && rv.length >= 3) {
+        const name = operands(rest.slice(1), new Set(["-t", "-m", "--track", "--master"]))[0]?.value ?? null;
+        acc.newRemotes.push(name ?? "\u0000dynamic");
+      }
       if (["add", "remove", "rm", "rename", "set-url", "set-head", "prune"].includes(rv[0] ?? "")) { commit(); return; }
       if (rv[0] === "update") net("net.fetch.vcs");
       return;
@@ -1018,6 +1101,14 @@ function git(args: WordInfo[], c: Ctx2): void {
       const refspecs = operands(rest, new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"])).slice(1);
       const plusOrColon = refspecs.some((r) => r.value === null || r.value.startsWith("+") || r.value.startsWith(":"));
       if (force || plusOrColon) { acc.tags.add("vcs.force-push"); acc.reason("force-pushes or deletes remote history"); }
+      const target = operands(rest, new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]))[0];
+      const repoOpt = rest.find((a) => (a.value ?? "").startsWith("--repo="))?.value?.slice(7);
+      const dest = repoOpt ?? (target ? target.value : undefined);
+      if (dest === null) acc.pushedTo.push("\u0000dynamic");
+      else if (dest !== undefined) {
+        if (isRepoUrl(dest)) acc.find("CP-EXFIL-034", "pushes straight to a repository URL instead of a configured remote");
+        else acc.pushedTo.push(dest);
+      }
       return;
     }
     case "pull": case "fetch": case "clone": case "ls-remote": case "submodule":

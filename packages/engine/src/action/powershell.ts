@@ -1,7 +1,7 @@
 // PowerShell analysis (engine-spec §7.4, rev 3/4): hand-written tokenizer, alias table,
 // cmdlet classes; native programs go through the §7.3 command table.
 import { Acc } from "./acc.js";
-import { isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
+import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
@@ -277,8 +277,7 @@ function destroysTopLevel(path: string | null, pctx: PathCtx): boolean {
   const lp = path.toLowerCase(), lh = home.toLowerCase();
   if (/^[a-z]:\/?\*?$/i.test(path) || path === "/" || path === "/*") return true;
   if (lh !== "" && (lp === lh || lp === lh + "/")) return true;
-  if (lh !== "" && lp.startsWith(lh + "/")) return !lp.slice(lh.length + 1).replace(/\/$/, "").includes("/");
-  return false;
+  return homeTopLevel(path, pctx);
 }
 
 function tokText(t: Tok | null | undefined): { value: string | null; pathValue: string | null } {

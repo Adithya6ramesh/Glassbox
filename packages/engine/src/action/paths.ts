@@ -300,6 +300,26 @@ export function persistenceHit(np: NormPath, ctx: PathCtx): PersistHit | null {
   return null;
 }
 
+// Regenerable caches one level under home: deleting them is routine cleanup, not data loss.
+const HOME_CACHES = new Set([".cache", ".npm", ".yarn", ".pnpm-store", ".node-gyp", ".gradle", ".m2", ".ivy2", ".bun", ".deno", ".nuget", ".pub-cache", ".expo", ".turbo"]);
+
+/**
+ * True when deleting `path` recursively would remove the home directory itself, everything in
+ * it, or a whole folder one level under it (~/Documents, ~/Desktop, ~/.ssh, C:/Users/u/Pictures),
+ * other than a regenerable cache. `path` is a normalized path; null is false.
+ */
+export function homeTopLevel(path: string | null, ctx: PathCtx): boolean {
+  if (path === null) return false;
+  const home = (normalizeFull(ctx.homeDir, { ...ctx, cwd: "/" }) ?? "").toLowerCase();
+  if (home === "") return false;
+  const lp = trimEndChars(path.toLowerCase(), "/");
+  if (lp === home || lp === home + "/*") return true;
+  if (!lp.startsWith(home + "/")) return false;
+  const rest = lp.slice(home.length + 1);
+  if (rest.includes("/")) return false;
+  return rest !== "*" && !HOME_CACHES.has(rest);
+}
+
 /** Returns a label if `np` is a sensitive path, else null. */
 export function sensitiveLabel(np: NormPath, ctx: PathCtx): string | null {
   const p = np.path ?? np.suffix ?? "";
