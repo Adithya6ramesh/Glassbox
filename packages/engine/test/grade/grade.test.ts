@@ -21,24 +21,53 @@ describe("scoring (grading.md §5, worked example §9)", () => {
     const s = scoreFindings(example, { partial: false });
     expect(s.score).toBe(85);
     expect(s.grade).toBe("D");
-    expect(s.caps.map((c) => c.cap)).toEqual(["D"]);
+    // rev 7: the medium findings also cap at C and the poisoning finding at B; D is the worst.
+    expect(s.caps.map((c) => c.cap)).toEqual(["D", "C", "B"]);
     const pts = Object.fromEntries(s.deductions.map((d) => [d.findingId, d.points]));
     expect(pts["CP-HIDDEN-001-/tools/0/description"]).toBeCloseTo(7.6);
     expect(pts["CP-HYGIENE-002-/tools/2"]).toBeCloseTo(0.75);
     expect(pts["CP-CAP-001-/tools/3"] ?? 0).toBe(0);
   });
 
-  it("without the hidden characters: 93 → A", () => {
+  it("without the hidden characters: score 93, but the medium poisoning finding caps it at C (rev 7)", () => {
     const s = scoreFindings(example.slice(1), { partial: false });
     expect(s.score).toBe(93);
+    expect(s.grade).toBe("C");
+    expect(s.caps.map((c) => c.cap)).toEqual(["C", "B"]);
+  });
+
+  it("only hygiene and a finding below the confidence floor: A, no caps", () => {
+    const s = scoreFindings(example.slice(2), { partial: false });
     expect(s.grade).toBe("A");
     expect(s.caps).toEqual([]);
   });
 
-  it("caps: critical → F, high → C, partial → B", () => {
+  it("caps (rev 7): the worst finding caps the grade: critical → F, high → D, medium → C; partial → B", () => {
     expect(scoreFindings([fnd("CP-X-001", "tool-poisoning", "critical", 0.9)], { partial: false }).grade).toBe("F");
-    expect(scoreFindings([fnd("CP-X-001", "tool-poisoning", "high", 0.3)], { partial: false }).grade).toBe("C");
+    expect(scoreFindings([fnd("CP-X-001", "tool-poisoning", "high", 0.3)], { partial: false }).grade).toBe("D");
+    expect(scoreFindings([fnd("CP-X-001", "integrity", "high", 1)], { partial: false }).grade).toBe("D");
+    expect(scoreFindings([fnd("CP-X-001", "capability-mismatch", "medium", 0.5)], { partial: false }).grade).toBe("C");
+    expect(scoreFindings([fnd("CP-X-001", "hygiene", "low", 1)], { partial: false }).grade).toBe("A");
     expect(scoreFindings([], { partial: true }).grade).toBe("B");
+  });
+
+  it.each([
+    ["CP-POISON-099", "tool-poisoning"],
+    ["CP-SHADOW-099", "shadowing"],
+    ["CP-SHADOW-010", "shadowing"],
+    ["CP-HIDDEN-004", "hidden-content"],
+  ] as const)("%s (%s), even at low severity, never gets an A", (id, cat) => {
+    const s = scoreFindings([fnd(id, cat, "low", 0.4)], { partial: false });
+    expect(s.score).toBeGreaterThanOrEqual(90);
+    expect(s.grade).toBe("B");
+  });
+
+  it("below the confidence floor (0.3) a finding doesn't cap", () => {
+    expect(scoreFindings([fnd("CP-POISON-099", "tool-poisoning", "high", 0.29)], { partial: false }).grade).toBe("A");
+  });
+
+  it("a claim of endorsement alone (CP-SPOOF-001, low) doesn't cap: it fires on benign text", () => {
+    expect(scoreFindings([fnd("CP-SPOOF-001", "tool-poisoning", "low", 0.4)], { partial: false }).grade).toBe("A");
   });
 
   it("repetition: 1, 0.5, 0.25… and a rule total ≤ 2× its first deduction", () => {

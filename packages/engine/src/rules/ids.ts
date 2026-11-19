@@ -16,6 +16,7 @@ export const ENGINE_RULE_IDS: readonly string[] = [
  "CP-HIDDEN-010",
  "CP-SHADOW-001",
  "CP-SHADOW-010",
+ "CP-SHADOW-011",
  "CP-CAP-001",
  "CP-CAP-002",
  "CP-HYGIENE-001",

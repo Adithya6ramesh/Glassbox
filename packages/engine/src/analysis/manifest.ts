@@ -52,6 +52,12 @@ function toolStrings(tool: unknown, base: string): { pointer: string; text: stri
   return out;
 }
 
+/** Widely used MCP server names that are worth imitating; known servers from the caller are added. */
+const WELL_KNOWN_SERVERS = [
+  "github", "gitlab", "slack", "gmail", "google", "googledrive", "filesystem", "notion", "linear", "jira", "atlassian",
+  "stripe", "aws", "postgres", "sentry", "figma", "anthropic", "openai", "microsoft", "azure", "cloudflare", "vercel",
+];
+
 export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | undefined, t0: number): ServerReport {
   const limits = resolveLimits(opts?.limits);
   const ruleset: LoadedRuleset = opts?.ruleset && Array.isArray(opts.ruleset.rules) ? opts.ruleset : EMBEDDED_BASELINE;
@@ -181,6 +187,21 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
       }
     }
   });
+
+  // Spoofed server names (rev 7): a name that isn't a known server's name but looks the same once
+  // look-alike letters are folded (ɡithub, gіthub, fiIesystem). Case alone (GitHub) doesn't count.
+  // Both sides are folded: the skeleton itself maps m → rn, and I and l only meet after lowercasing.
+  const fold = (s: string) => buildViews(s).skeleton.text.replace(/[i1|]/g, "l").replace(/0/g, "o");
+  const knownNames = [...new Set([...WELL_KNOWN_SERVERS, ...known.map((k) => (typeof k.serverId === "string" ? k.serverId.toLowerCase() : "")).filter(Boolean)])];
+  const knownFolded = new Set(knownNames.map(fold));
+  const info = get(get(m, "initialize"), "serverInfo");
+  for (const [ptr, n] of [["/initialize/serverInfo/name", getString(info, "name")], ["/serverId", getString(m, "serverId")]] as const) {
+    if (n === undefined || n.length > 200) continue;
+    if (!knownNames.includes(n.toLowerCase()) && knownFolded.has(fold(n))) {
+      findings.push(ff.make({ ruleId: "CP-SHADOW-011", location: ptr, text: n }));
+      break;
+    }
+  }
 
   // Split payloads across tools (red team, Step 5): every tool's description, in order.
   const descs = tools.map((t, i) => ({ pointer: `/tools/${i}/description`, text: getString(t, "description") ?? "" })).filter((d) => d.text.length > 0);
