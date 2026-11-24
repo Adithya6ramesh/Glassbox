@@ -1,4 +1,4 @@
-// Secret detectors (engine-spec §8.1). Patterns run on the linear regex engine (re2js).
+// Secret detectors. Patterns run on the linear regex engine (re2js).
 import { findAll } from "../util/re.js";
 
 export interface SecretHit {
@@ -215,7 +215,7 @@ function resolveOverlaps(hits: SecretHit[]): SecretHit[] {
   return kept.sort((a, b) => a.start - b.start);
 }
 
-// ── Masking (§8.2) ───────────────────────────────────────────────────────
+// ── Masking ───────────────────────────────────────────────────────
 
 const PUBLIC_PREFIXES = [
   "github_pat_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "glpat-", "gldt-", "glrt-", "xoxb-", "xoxa-", "xoxp-", "xoxr-", "xoxs-", "xapp-",

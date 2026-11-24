@@ -1,4 +1,4 @@
-// Grading (grading.md §3–§5).
+// Grading.
 import type { Category, Finding, Grade, Severity } from "../types.js";
 
 const POINTS: Record<Severity, number> = { info: 0, low: 3, medium: 8, high: 20, critical: 40 };

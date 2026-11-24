@@ -1,4 +1,4 @@
-// The wall-clock backstop (spec §11, hardStopMs) on every gate path. Found by the Step 6
+// The wall-clock backstop on every gate path. Found by the Step 6
 // bench: the gate never passed a deadline to the scanner, so a result with 2,000 fields ran
 // for 2.8 s against a 100 ms limit, and checkToolResult/checkServerRequest had no time
 // check at all. hardStopMs: 0 makes the stop deterministic: any real work exceeds it.

@@ -1,4 +1,4 @@
-// analyzeServer (engine-spec §4.2, grading.md): metadata-only analysis of an MCP manifest.
+// analyzeServer: metadata-only analysis of an MCP manifest.
 import { buildViews } from "../canon/views.js";
 import { profileMcpTool, nameWords } from "../action/tools.js";
 import { fingerprintOf } from "../fingerprint/fingerprint.js";
@@ -133,7 +133,7 @@ export function analyzeServerImpl(manifestIn: unknown, opts: AnalyzeOptions | un
 
   // Layer 1 over every field.
   const fields: Field[] = manifestFields(m, limits.maxTools);
-  // The grader's time backstop (spec §11: hardStopMs 2,000 for the grader).
+  // The grader's time backstop.
   const deadline = t0 + (opts?.limits?.hardStopMs ?? 2000);
   const scan = scanFields(fields, "manifest", ff, ruleset.rules, limits, true, deadline);
   findings.push(...scan.findings);

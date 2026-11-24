@@ -1,4 +1,4 @@
-// Shell classification (engine-spec §7.3, Q5/Q6 rev 4) over the parsed AST.
+// Shell classification over the parsed AST.
 import { Acc } from "../acc.js";
 import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
 import { commandFiles, schtasksJob } from "../schedule.js";
@@ -470,12 +470,7 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   }
 
   // ── Self-protection commands ───────────────────────────────────────────
-  if (lower === "glassbox" || lower === "glassbox.exe") {
-    const sub = operands(args)[0]?.value ?? "";
-    const mutating = ["mode", "allow", "uninstall", "logout", "login", "install", "pair", "unpair", "config", "set", "disable", "enable", "reset"].includes(sub) || (sub === "doctor" && hasFlag(args, "--fix"));
-    if (mutating || args.some((a) => a.value === null)) acc.protect("CP-SELF-003", "changes Glassbox protection settings");
-    return;
-  }
+  if (lower === "glassbox" || lower === "glassbox.exe") { glassboxCli(args, acc); return; }
   if (lower === "claude" || lower === "claude.exe") return claudeCommand(args, c);
   if (lower === "reg" || lower === "reg.exe") {
     const flat = args.map((a) => (a.value ?? a.word.raw)).join(" ").toLowerCase().replace(/[\\/"']/g, "");
@@ -702,6 +697,9 @@ function interpreter(lower: string, args: WordInfo[], c: Ctx2): void {
     const np = a.pathValue !== null && looksLikePath(a.pathValue) ? normalizePath(a.pathValue, pctx) : null;
     if (np && isProtectedWrite(np, pctx, a.glob)) { acc.protect("CP-SELF-001", "hands a protected agent or Glassbox file to an interpreter"); return; }
   }
+  // An interpreter running the Glassbox CLI script directly (node …/glassbox/dist/cli.js allow …).
+  const gbScript = args.findIndex((a) => a.value !== null && !a.value.startsWith("-") && a.value.toLowerCase().includes("glassbox"));
+  if (gbScript >= 0) { glassboxCli(args.slice(gbScript + 1), acc); if (acc.selfProtection) return; }
   const hereStr = cmd.redirects.find((r) => r.op === "<<<")?.target;
   const body = cmd.redirects.find((r) => r.heredoc)?.heredoc?.body ?? (hereStr ? wordInfo(hereStr).value ?? "" : "");
   if (body && protectedText(body, pctx)) { acc.protect(body.includes(".key") ? "CP-SELF-002" : "CP-SELF-001", "inline code refers to a protected agent or Glassbox file"); return; }
@@ -711,7 +709,7 @@ function interpreter(lower: string, args: WordInfo[], c: Ctx2): void {
     const code = args[idx + 1];
     acc.tag("write-reversible", "exec.inline-code");
     if (!code || code.value === null) { acc.unanalyzable("inline code isn't a literal string"); return; }
-    // Protected paths inside the code → self-protection (spec §7.6.2).
+    // Protected paths inside the code → self-protection.
     if (protectedText(code.value, pctx)) {
       const lowerCode = code.value.toLowerCase();
       acc.protect(lowerCode.includes(".key") || lowerCode.includes("device") ? "CP-SELF-002" : "CP-SELF-001", "inline code refers to a protected agent or Glassbox file");
@@ -764,10 +762,23 @@ function protectedText(text: string, pctx: PathCtx): boolean {
   return needles.some((n) => n.length > 0 && t.includes(n));
 }
 
+/**
+ * The Glassbox CLI: subcommands that change protection are self-protection (the agent may
+ * never run them, however it launches the CLI). A non-literal argument counts as changing.
+ */
+const GLASSBOX_MUTATING = new Set(["mode", "allow", "uninstall", "logout", "login", "install", "pair", "unpair", "config", "set", "disable", "enable", "reset", "deny", "forget", "revoke"]);
+function glassboxCli(args: WordInfo[], acc: Acc): void {
+  const sub = (operands(args)[0]?.value ?? "").toLowerCase();
+  const mutating = GLASSBOX_MUTATING.has(sub) || (sub === "doctor" && hasFlag(args, "--fix"));
+  if (mutating || args.some((a) => a.value === null)) acc.protect("CP-SELF-003", "changes Glassbox protection settings");
+}
+
 function projectTool(rest: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   const h = rest[0];
   if (!h || h.value === null) { c.acc.unanalyzable("package runner with a non-literal package"); return; }
   const n = (() => { const v = h.value as string; const slash = v.lastIndexOf("/"); const at = v.indexOf("@", slash + 1); return (at >= 0 ? v.slice(0, at) : v).split("/").pop() ?? ""; })();
+  // A package runner launching the Glassbox CLI (npx glassbox allow …, pnpm dlx @glassbox-ai/…).
+  if ((h.value as string).toLowerCase().includes("glassbox")) { glassboxCli(rest.slice(1), c.acc); return; }
   if (PROJECT.has(n) || READ.has(n)) { c.acc.tag("write-reversible", "exec.project-code"); return; }
   if (unwrapDepth < 4 && (n === "rimraf" || n === "del-cli")) { c.acc.tag("high-risk", "fs.delete"); return; }
   c.acc.tag("write-reversible", "exec.project-code");

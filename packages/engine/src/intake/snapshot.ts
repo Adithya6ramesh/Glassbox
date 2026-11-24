@@ -1,4 +1,4 @@
-// C2.4 (engine-spec §5.2): snapshot an object input into frozen null-prototype data.
+// C2.4: snapshot an object input into frozen null-prototype data.
 // Reads only own enumerable data properties via descriptors (getters are never invoked),
 // detects cycles, drops non-JSON values, survives hostile Proxies, bounded and iterative.
 import { parseJsonStrict, type IntakeIssue } from "./json.js";

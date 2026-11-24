@@ -10,7 +10,7 @@ EOF
 )"`;
 
 describe("reference verdicts", () => {
-  // Spec §6.2 rev 5 (approved 2026-11-19): irreversible and public actions ask in every
+  // Irreversible and public actions ask in every
   // mode, so autopilot denies them (R15).
   it("git push --force: ask in strict and balanced, deny in autopilot", () => {
     expect(acrossModes((c) => bash("git push --force origin main", c))).toEqual(["ask", "ask", "deny"]);

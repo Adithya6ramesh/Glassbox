@@ -1,4 +1,4 @@
-// Evidence construction (engine-spec §8.3) and renderForModel (§8.5).
+// Evidence construction and renderForModel.
 import { DEFAULT_LIMITS } from "../limits.js";
 import { redactString } from "../secrets/redact.js";
 import type { Finding } from "../types.js";

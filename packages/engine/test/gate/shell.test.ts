@@ -1,4 +1,4 @@
-// Shell classification through checkToolCall (spec §7.3), including Q5 substitution
+// Shell classification through checkToolCall, including Q5 substitution
 // rules (invariant I18), Q6 inline code (I20) and the AG-30 obfuscation table.
 import { describe, expect, it } from "vitest";
 import { acrossModes, bash, ctx, ruleIds } from "../helpers.js";

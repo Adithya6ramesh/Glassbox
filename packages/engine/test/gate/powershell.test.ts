@@ -1,4 +1,4 @@
-// PowerShell analysis (spec §7.4).
+// PowerShell analysis.
 import { describe, expect, it } from "vitest";
 import { ps, ruleIds, winCtx } from "../helpers.js";
 

@@ -1,4 +1,4 @@
-// T-DIFF corpus (spec §13): hostile and odd shell commands, generated deterministically
+// T-DIFF corpus: hostile and odd shell commands, generated deterministically
 // from hand-written templates and fragments. Nothing here is run on a real system: the
 // harness runs bash with PATH empty, every external command and risky builtin stubbed,
 // HOME and cwd in a throwaway sandbox.

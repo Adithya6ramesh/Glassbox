@@ -1,4 +1,4 @@
-// EMBEDDED_BASELINE (engine-spec §10.2, R17). At load the engine hashes the embedded JSON
+// EMBEDDED_BASELINE. At load the engine hashes the embedded JSON
 // text once (SHA-256, ~50 KB) and compares it with the hash recorded at build time. Full
 // schema validation and every rule's self-test run in CI (I6), not at every hook start.
 import type { ActionTag, LoadedRuleset, RuleDef } from "../types.js";

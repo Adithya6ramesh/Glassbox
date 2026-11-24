@@ -1,10 +1,11 @@
-// Tool classification (engine-spec §7.1): built-in agent tools and MCP tools.
+// Tool classification: built-in agent tools and MCP tools.
 import type { ActionTag, ToolDef } from "../types.js";
 import { get, getString, isRecord } from "../util/misc.js";
 import { Acc } from "./acc.js";
 import {
   coversProtectedRead, globCoversProtectedRead, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type PathCtx,
 } from "./paths.js";
+import { builtinCategory } from "./builtin-tools.js";
 import { analyzePowerShell } from "./powershell.js";
 import { isProtectedWrite } from "./protected-write.js";
 import { analyzeShellCommand } from "./shell/analyze.js";
@@ -66,11 +67,40 @@ export function classifyBuiltin(toolName: string, args: unknown, t: ToolCtx): Ac
     writePath(p, acc, t);
     return acc;
   }
+  if (name === "monitor") {
+    // Monitor runs a background shell command (or watches a WebSocket) and streams its output
+    // to the agent. The command gets the full shell analysis, like Bash.
+    const cmd = str("command");
+    let out: Acc | null = cmd !== undefined ? analyzeShellCommand(cmd, { pctx: t.pctx, depth: 0, maxBytes: t.maxCommandBytes }) : null;
+    const wsUrl = getString(get(args, "ws"), "url");
+    if (wsUrl !== undefined) {
+      const a = out ?? acc;
+      a.tag("high-risk", "net.egress");
+      a.network = true;
+      const h = hostOf(wsUrl);
+      a.reason(h ? `watches a WebSocket on ${h}` : "watches a WebSocket on an unknown host");
+      out = a;
+    }
+    if (out === null) { acc.unanalyzable("Monitor call without a command string"); return acc; }
+    return out;
+  }
   if (name === "webfetch") {
     acc.tag("high-risk", "net.egress");
     acc.network = true;
     const h = hostOf(str("url") ?? "");
     acc.reason(h ? `destination host: ${h}` : "destination host unknown");
+    return acc;
+  }
+  if (name === "enterworktree") {
+    acc.tag("write-reversible", "fs.write");
+    const p = str("path");
+    if (p !== undefined) writePath(p, acc, t);
+    acc.reason("creates or enters a git worktree");
+    return acc;
+  }
+  if (name === "exitworktree") {
+    acc.tag("write-reversible", "fs.write");
+    acc.reason("leaves a git worktree");
     return acc;
   }
   if (READ_TOOLS.has(name)) {
@@ -90,8 +120,39 @@ export function classifyBuiltin(toolName: string, args: unknown, t: ToolCtx): Ac
     }
     return acc;
   }
-  acc.tag("write-reversible", "exec.unknown");
-  acc.reason(`runs the agent tool ${toolName.slice(0, 40)}`);
+  const label = toolName.slice(0, 40);
+  switch (builtinCategory(toolName)) {
+    case "network":
+      // Artifact, ShareOnboardingGuide: publish local content to a hosted page.
+      acc.tag("high-risk", "net.egress");
+      acc.network = true;
+      acc.reason(`sends content off the machine (${label})`);
+      return acc;
+    case "agent":
+      if (name === "remotetrigger") {
+        acc.tag("high-risk", "exec.nested-agent");
+        acc.reason("creates or runs a scheduled agent in the cloud, where these checks don't run");
+        return acc;
+      }
+      // Agent, Workflow, Skill, SendMessage, CronCreate, ScheduleWakeup: the work they start runs
+      // as ordinary tool calls in this Claude Code, and each of those is checked.
+      acc.raise("write-reversible");
+      acc.reason(`starts agent work (${label}); its tool calls are checked one by one`);
+      return acc;
+    case "other":
+      acc.raise("write-reversible");
+      acc.reason(`acts inside the session (${label})`);
+      return acc;
+    case "read":
+      return acc;
+    case "command":
+    case "write":
+    case undefined:
+      break;
+  }
+  // A built-in tool this engine doesn't know: it may run commands or write files, and nothing
+  // here can tell. Unanalyzable (ask; deny in autopilot), never "harmless".
+  acc.unanalyzable(`unknown agent tool ${label}`);
   return acc;
 }
 
@@ -177,7 +238,7 @@ export function classifyMcp(name: string, args: unknown, descriptor: ToolDef | u
     }
   }
   if (sqlSeen) {
-    // The statement decides, not the tool's verb (§7.1 step 3).
+    // The statement decides, not the tool's verb.
     const keep = new Acc();
     keep.merge(sqlAcc);
     for (const f of acc.findings) keep.find(f.ruleId, f.note);

@@ -1,4 +1,4 @@
-// Layer 1 declarative matching (engine-spec §3.2, §6.6, §10.1).
+// Layer 1 declarative matching.
 import { findDecodable } from "../canon/decode.js";
 import { buildViews, normChar, type Views } from "../canon/views.js";
 import { detectSecrets, type SecretMemo } from "../secrets/detect.js";
@@ -31,7 +31,7 @@ const RE_WS = /^\p{White_Space}$/u;
 
 function rawNormOf(s: string): string {
   // Like norm, but invisibles/ANSI/bidi/tags are NOT removed: used to tell whether a
-  // match only exists because hidden characters were stripped (§6.6 invisible-stripped).
+  // match only exists because hidden characters were stripped.
   let out = "";
   let space = false;
   for (const ch of s) {

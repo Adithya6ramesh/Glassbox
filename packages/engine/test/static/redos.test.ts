@@ -1,4 +1,4 @@
-// Engine-internal regex literals must be ReDoS-safe (engine-spec §10.3). Rule regexes run
+// Engine-internal regex literals must be ReDoS-safe. Rule regexes run
 // on re2js (linear time); the engine's own JS regex literals run on V8's backtracking
 // engine, so each one is checked with recheck and must come back "safe".
 // (Gap found in the Step 6 follow-up: the spec required this check but nothing ran it.)

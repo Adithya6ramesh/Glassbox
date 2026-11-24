@@ -1,4 +1,4 @@
-// Ruleset loading (engine-spec §10.2, Q9 rev 4).
+// Ruleset loading.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import * as v from "valibot";
 import { decodeBase64 } from "../canon/decode.js";

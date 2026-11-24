@@ -1,4 +1,4 @@
-// Rule self-tests (engine-spec §10.2 step 8, invariant I6): every declarative rule's own
+// Rule self-tests: every declarative rule's own
 // positive cases must produce it and its negative cases must not.
 import type { LoadedRuleset, RuleTestCase, SessionContext } from "../types.js";
 import { analyzeServerImpl } from "../analysis/manifest.js";

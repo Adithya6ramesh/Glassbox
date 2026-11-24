@@ -1,4 +1,4 @@
-// The only host APIs the engine may use (engine-spec §1.1). All are standard Web APIs,
+// The only host APIs the engine may use. All are standard Web APIs,
 // available in Node.js and browsers, so the engine stays portable to the browser grader.
 // - performance.now(): Decision.elapsedMs and the hardStopMs backstop, never for logic
 // - TextEncoder / TextDecoder / atob: byte ↔ text conversion (no I/O)

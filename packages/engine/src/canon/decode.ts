@@ -1,4 +1,4 @@
-// C5 (engine-spec §5.5): find encoded blobs with a linear scanner and decode them.
+// C5: find encoded blobs with a linear scanner and decode them.
 // Kept only if the result is valid UTF-8 with ≥ 80% printable code points.
 import { trimEndChars } from "../util/misc.js";
 

@@ -1,4 +1,4 @@
-// RFC 8785 JSON Canonicalization Scheme, hand-written (engine-spec §12.8).
+// RFC 8785 JSON Canonicalization Scheme, hand-written.
 // Works on snapshot values (null-prototype objects, arrays, strings, finite numbers,
 // booleans, null). Iterative, so input depth can't overflow the stack.
 

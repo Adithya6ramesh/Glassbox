@@ -1,5 +1,5 @@
-// Policy decision table (engine-spec §6.2, rows R1–R17).
-import type { ActionRisk, ActionTag, ApprovalMode, Finding, LoadedRuleset, RememberedRule, Severity, UserPolicy, Verdict } from "../types.js";
+// Policy decision table.
+import type { ActionRisk, ActionTag, ApprovalMode, Finding, LoadedRuleset, RememberedRule, SessionGrant, Severity, UserPolicy, Verdict } from "../types.js";
 
 const ORDER: Verdict[] = ["allow", "warn", "ask", "deny"];
 export const vmax = (a: Verdict, b: Verdict): Verdict => (ORDER.indexOf(a) >= ORDER.indexOf(b) ? a : b);
@@ -17,6 +17,10 @@ export interface DecideInput {
   serverId: string;
   toolName: string;
   remembered: readonly RememberedRule[];
+  /** The current project; a remembered rule applies only when its projectIdHash equals this. */
+  projectIdHash?: string | undefined;
+  sessionId: string;
+  sessionGrants: readonly SessionGrant[];
   /** checkServerRequest: verdict from the kind's policy (R13) and whether it's locked (R14). */
   requestVerdict?: { verdict: Verdict; locked: boolean };
 }
@@ -24,13 +28,27 @@ export interface DecideInput {
 export interface DecideOutput { verdict: Verdict; verdictBeforeMode?: Verdict }
 
 /**
- * R3 by mode (spec §6.2, rev 5). Irreversible-or-public tags ask in every mode, so in
- * autopilot they become deny through R15 unless a tag override or a remembered rule lifts
- * the ask first. Other high-risk tags: strict asks, balanced and autopilot warn.
+ * R3 by mode. Other high-risk tags: strict asks, balanced and autopilot warn.
+ * Irreversible-or-public tags (force push, history rewrite, wipes, payments, production
+ * deploys, publishing, …) are a floor: they ask in every mode, and autopilot turns that into
+ * deny (R15). Nothing the user set up earlier lowers them: a tagOverride can only raise them to
+ * deny, and remembered rules and session grants never lift them.
  */
-function modeVerdict(tag: ActionTag | null, mode: ApprovalMode, irreversible: ReadonlySet<ActionTag>): Verdict {
-  if (tag !== null && irreversible.has(tag)) return "ask";
+function modeVerdict(mode: ApprovalMode): Verdict {
   return mode === "strict" ? "ask" : "warn";
+}
+
+const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
+
+/** A remembered rule (this project) or session grant (this session) covering (server, tool, tag). */
+function lifted(d: DecideInput, tag: ActionTag): boolean {
+  // Own string properties only: a field inherited through a prototype doesn't count.
+  const own = (m: object, k: string, want: string): boolean => Object.hasOwn(m, k) && (m as Record<string, unknown>)[k] === want;
+  const match = (m: unknown, scopeKey: string, scope: string): boolean =>
+    typeof m === "object" && m !== null && own(m, "serverId", d.serverId) && own(m, "toolName", d.toolName) && own(m, "actionTag", tag) && own(m, scopeKey, scope);
+  const project = d.projectIdHash;
+  if (str(project) && d.remembered.some((m) => match(m, "projectIdHash", project))) return true;
+  return str(d.sessionId) && d.sessionGrants.some((g) => match(g, "sessionId", d.sessionId));
 }
 
 export function decide(d: DecideInput): DecideOutput {
@@ -38,20 +56,28 @@ export function decide(d: DecideInput): DecideOutput {
   let v: Verdict = "allow";
   const irreversible = new Set(d.ruleset.irreversibleTags);
 
-  // R3 (calls only): high-risk action, by mode, then tagOverrides, then remembered rules.
+  // R3 (calls only): high-risk action, by mode, then tagOverrides, then remembered rules and
+  // session grants (mode-driven asks only, never the irreversible floor).
   if (d.kind === "call" && d.risk.level === "high-risk") {
     const tags = d.risk.tags.filter((t) => t !== "self-protection");
     let r3: Verdict = "allow";
-    const askTags: ActionTag[] = [];
+    let floorAsk = false;
+    const liftable: ActionTag[] = [];
     const list: (ActionTag | null)[] = tags.length > 0 ? tags : [null];
     for (const t of list) {
-      let tv = modeVerdict(t, mode, irreversible);
       const o = t !== null ? d.policy.tagOverrides?.[t] : undefined;
-      if (o === "allow" || o === "ask" || o === "deny") tv = o;
-      if (tv === "ask" && t !== null) askTags.push(t);
+      let tv: Verdict;
+      if (t !== null && irreversible.has(t)) {
+        tv = o === "deny" ? "deny" : "ask";
+        if (tv === "ask") floorAsk = true;
+      } else {
+        tv = modeVerdict(mode);
+        if (o === "allow" || o === "ask" || o === "deny") tv = o;
+        if (tv === "ask" && t !== null) liftable.push(t);
+      }
       r3 = vmax(r3, tv);
     }
-    if (r3 === "ask" && askTags.length > 0 && askTags.every((t) => d.remembered.some((m) => m.serverId === d.serverId && m.toolName === d.toolName && m.actionTag === t))) r3 = "allow";
+    if (r3 === "ask" && !floorAsk && liftable.length > 0 && liftable.every((t) => lifted(d, t))) r3 = "allow";
     v = vmax(v, r3);
   }
 

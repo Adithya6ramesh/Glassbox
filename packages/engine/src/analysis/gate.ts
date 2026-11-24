@@ -1,4 +1,4 @@
-// The gate: checkToolCall / checkToolResult / checkServerRequest (engine-spec §4, §6).
+// The gate: checkToolCall / checkToolResult / checkServerRequest.
 import { Acc } from "../action/acc.js";
 import { normalizePath, pathCtxFrom, type PathCtx } from "../action/paths.js";
 import { commandFiles, cronLines, desktopJob, JOB_LABEL, plistJob, psTaskJob, unitJob, type ScheduledJob } from "../action/schedule.js";
@@ -25,7 +25,7 @@ import { scanFields } from "./scan.js";
 const now = (): number => performance.now();
 
 /**
- * The gate's time backstop (spec §11, hardStopMs): true once this call has run longer than
+ * The gate's time backstop: true once this call has run longer than
  * the limit, not counting one-time initialization (regex compiles, tables), which the first
  * call in a process pays and later calls don't.
  */
@@ -345,12 +345,14 @@ export function checkToolCallImpl(input: unknown, ctxIn: SessionContext, t0: num
   if (ext.length > 0) signals.push({ kind: "external-write", serverId, toolName, tags: ext, atCall: at });
   if (c.protectionDegraded) signals.push({ kind: "protection-degraded", reason: degradedReason(c), atCall: at });
   // A job that creates or changes something runs its files later. The caller keeps this signal
-  // only if the call is approved and runs (engine-spec §4.5); it doesn't expire.
+  // only if the call is approved and runs; it doesn't expire.
   for (const j of jobs) if (j.verb !== "removes" && j.files.length > 0) signals.push({ kind: "scheduled-job", job: j.kind, schedule: j.schedule, files: j.files, atCall: at });
 
   const out = decide({
     kind: "call", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
-    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName, remembered: Array.isArray(c.raw.remembered) ? c.raw.remembered : [],
+    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName, remembered: Array.isArray(c.raw.remembered) ? c.raw.remembered.slice(0, 1000) : [],
+    projectIdHash: typeof c.raw.projectIdHash === "string" ? c.raw.projectIdHash : undefined, sessionId: typeof c.raw.sessionId === "string" ? c.raw.sessionId : "",
+    sessionGrants: Array.isArray(c.raw.sessionGrants) ? c.raw.sessionGrants.slice(0, 1000) : [],
   });
   return {
     verdict: out.verdict,
@@ -456,7 +458,7 @@ export function checkToolResultImpl(input: unknown, ctxIn: SessionContext, t0: n
 
   const out = decide({
     kind: "result", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
-    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName, remembered: [],
+    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName, remembered: [], sessionId: "", sessionGrants: [],
   });
   let resultRewrite: Decision["resultRewrite"];
   if (out.verdict === "deny") {
@@ -541,7 +543,7 @@ export function checkServerRequestImpl(input: unknown, ctxIn: SessionContext, t0
   const degraded = ink.degraded || scan.windowed || scan.timedOut;
   const out = decide({
     kind: "server-request", risk, findings: fs, degraded, protectionDegraded: c.protectionDegraded, ruleset: c.ruleset, policy: c.raw.policy,
-    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName: method, remembered: [], requestVerdict: { verdict: choice as Verdict, locked },
+    minConfidence: c.limits.minConfidenceForVerdict, serverId, toolName: method, remembered: [], sessionId: "", sessionGrants: [], requestVerdict: { verdict: choice as Verdict, locked },
   });
   return {
     verdict: out.verdict,

@@ -1,4 +1,4 @@
-// @glassbox-ai/engine/ruleset: loading signed ruleset caches (engine-spec §10.2).
+// @glassbox-ai/engine/ruleset: loading signed ruleset caches.
 // Kept out of the main entry so an ordinary hook call doesn't pay for Ed25519 and schema
 // validation at start-up (150 ms hook budget). Import this only when a cache file exists.
 export { loadRuleset, EMBEDDED_TRUSTED_KEYS, REVOKED_KEY_IDS } from "./ruleset/load.js";

@@ -31,7 +31,7 @@ export function mixedScript(text: string): { start: number; end: number } | null
 
 export function scanFields(fields: Field[], surface: Surface, ff: FindingFactory, rules: readonly import("../types.js").RuleDef[], limits: Limits, hidden: boolean, deadline: number | (() => boolean) = Number.POSITIVE_INFINITY): ScanOutcome {
   // The time backstop: checked before each field and between rules, so one large field
-  // can't run far past it (spec §11, hardStopMs).
+  // can't run far past it.
   const late = typeof deadline === "function" ? deadline : () => performance.now() > deadline;
   const findings: (Finding | null)[] = [];
   const scans = new Map<Field, FieldScan>();

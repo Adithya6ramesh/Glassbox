@@ -1,4 +1,4 @@
-// C4 (engine-spec §5.4): Unicode views with offset maps back to the original string.
+// C4: Unicode views with offset maps back to the original string.
 // All transforms are per code point (after invisible/ANSI removal), so each view is
 // idempotent (P1) and every output position maps to an original position.
 import { CONFUSABLES } from "./confusables.generated.js";

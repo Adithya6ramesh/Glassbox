@@ -1,4 +1,4 @@
-// checkToolResult (§6.4: I16, I19), injection in results, toxic flows (I10, CP-FLOW-003),
+// checkToolResult, injection in results, toxic flows (I10, CP-FLOW-003),
 // server requests (I9) and session-signal behaviour.
 import { describe, expect, it } from "vitest";
 import { checkServerRequest, checkToolResult, type SessionSignal, type ToolResultInput } from "../../src/index.js";
@@ -60,7 +60,7 @@ describe("prompt injection in tool results", () => {
   });
 });
 
-describe("secrets in results (§6.4)", () => {
+describe("secrets in results", () => {
   it("balanced: not hidden, secret-seen emitted, no rewrite", () => {
     const d = result(`token=${FAKE.github}`);
     expect(d.resultRewrite).toBeUndefined();

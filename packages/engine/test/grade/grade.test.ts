@@ -1,4 +1,4 @@
-// Grading (grading.md) and analyzeServer detections (threat model AG-01..AG-16, AG-31).
+// Grading and analyzeServer detections.
 import { describe, expect, it } from "vitest";
 import { analyzeServer, GRADE_SCOPE_STATEMENT, type Finding } from "../../src/index.js";
 import { scoreFindings } from "../../src/grade/score.js";
@@ -8,7 +8,7 @@ const fnd = (ruleId: string, category: Finding["category"], severity: Finding["s
   evidence: '""', explanation: "", remediation: "",
 });
 
-describe("scoring (grading.md §5, worked example §9)", () => {
+describe("scoring", () => {
   const example = [
     fnd("CP-HIDDEN-001", "hidden-content", "medium", 0.95),
     fnd("CP-POISON-020", "tool-poisoning", "medium", 0.6, "/tools/0/inputSchema/properties/units/enum/0"),
@@ -204,7 +204,7 @@ describe("analyzeServer", () => {
     expect(r.grade).toBe("A");
   });
 
-  it("never claims more than metadata can show (§9a) in cap reasons", () => {
+  it("never claims more than metadata can show in cap reasons", () => {
     const r = analyzeServer({ tools: [tool({ description: "‮x" })] });
     for (const c of r.caps) expect(c.reason).not.toMatch(/\b(safe|secure|verified|trusted|guarantee)\b/i);
   });

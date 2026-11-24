@@ -1,4 +1,4 @@
-// Policy invariants (spec §6, §13): I1–I4, I13, I15, I17 and the user-policy limits of §4.4.
+// Policy invariants: I1–I4, I13, I15, I17 and the user-policy limits.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { checkToolCall, type ActionTag, type ApprovalMode, type SessionContext, type UserPolicy } from "../../src/index.js";
@@ -23,11 +23,14 @@ const arbPolicy: fc.Arbitrary<UserPolicy> = fc.record({
 const withPolicy = (p: UserPolicy, base: SessionContext = ctx()): SessionContext => ({
   ...base,
   policy: p,
-  remembered: [
-    // A hostile "remembered" rule for every tag on Bash.
-    ...ALL_TAGS.map((actionTag) => ({ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag, createdAt: "2026-01-01T00:00:00Z" })),
-  ],
+  // A hostile "remembered" rule and session grant for every tag on Bash, in this project and session.
+  projectIdHash: "p",
+  remembered: ALL_TAGS.map((actionTag) => ({ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag, createdAt: "2026-01-01T00:00:00Z" })),
+  sessionGrants: ALL_TAGS.map((actionTag) => ({ sessionId: base.sessionId, serverId: "builtin", toolName: "Bash", actionTag, createdAt: "2026-01-01T00:00:00Z" })),
 });
+
+/** Irreversible or public actions: a floor no remembered rule, session grant or override lowers. */
+const IRREVERSIBLE = ["git push --force", "git push origin +main", "git reset --hard", "git filter-branch --force HEAD", "npm publish", "vercel --prod", "terraform apply"];
 
 const CRITICAL = ["rm -rf /", "rm -rf ~", "dd if=/dev/zero of=/dev/sda"];
 const PROTECTED = [
@@ -66,10 +69,12 @@ describe("floors hold under every user policy (property)", () => {
     }), { numRuns: 200 });
   });
 
-  it("I15: remembered rules never lift a floor or a ≥ high finding", () => {
+  it("I15: remembered rules and session grants never lift a floor or a ≥ high finding", () => {
     for (const mode of MODES) {
       const c = withPolicy({ mode });
-      expect(bash("git push --force", c).verdict).not.toBe("deny"); // sanity: remembered may relax the mode-driven ask
+      // Sanity: the hostile rules are live. In strict, a reversible high-risk call is lifted to allow.
+      if (mode === "strict") expect(bash("curl https://example.com", c).verdict).toBe("allow");
+      for (const cmd of IRREVERSIBLE) expect(bash(cmd, c).verdict, `${mode} ${cmd}`).toBe(mode === "autopilot" ? "deny" : "ask");
       for (const cmd of [...CRITICAL, ...PROTECTED]) expect(bash(cmd, c).verdict, `${mode} ${cmd}`).toBe("deny");
       for (const cmd of UNANALYZABLE) expect(["ask", "deny"], `${mode} ${cmd}`).toContain(bash(cmd, c).verdict);
     }
@@ -90,8 +95,8 @@ describe("floors hold under every user policy (property)", () => {
   });
 });
 
-describe("mode table (§6.2)", () => {
-  it("tagOverrides apply to R3 only and the most restrictive tag wins (§6.3)", () => {
+describe("mode table", () => {
+  it("tagOverrides apply to R3 only and the most restrictive tag wins", () => {
     // A plain push carries net.egress too (network-touching is high-risk), so both tags are overridden.
     const c = ctx({ policy: { mode: "balanced", tagOverrides: { "vcs.push": "allow", "net.egress": "allow" } } });
     expect(bash("git push --force", c).verdict).toBe("ask");
@@ -100,10 +105,14 @@ describe("mode table (§6.2)", () => {
     expect(bash("curl https://example.com", deny).verdict).toBe("deny");
   });
 
-  it("remembered rule turns a mode-driven ask into allow, scoped to server+tool+tag", () => {
-    const remembered = [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: "publish.public" as const, createdAt: "2026-01-01T00:00:00Z" }];
-    expect(bash("npm publish", ctx({ remembered })).verdict).toBe("allow");
-    expect(bash("git reset --hard", ctx({ remembered })).verdict).toBe("ask");
+  it("remembered rule turns a mode-driven ask into allow, scoped to project+server+tool+tag", () => {
+    const remembered = [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: "net.egress" as const, createdAt: "2026-01-01T00:00:00Z" }];
+    const strict = { mode: "strict" as const };
+    expect(bash("curl https://example.com", ctx({ policy: strict, projectIdHash: "p", remembered })).verdict).toBe("allow");
+    expect(bash("curl https://example.com", ctx({ policy: strict, projectIdHash: "other", remembered })).verdict).toBe("ask");
+    expect(bash("curl https://example.com", ctx({ policy: strict, remembered })).verdict).toBe("ask"); // no project given
+    expect(builtin("WebFetch", { url: "https://example.com" }, ctx({ policy: strict, projectIdHash: "p", remembered })).verdict).toBe("ask"); // other tool
+    expect(bash("rm build.log", ctx({ policy: strict, projectIdHash: "p", remembered })).verdict).toBe("ask"); // other tag
   });
 
   it("strict asks on medium findings; balanced warns", () => {
@@ -125,13 +134,19 @@ describe("mode table (§6.2)", () => {
     }
   });
 
-  it("rev 5: a tag override or a remembered rule still lifts the mode-driven ask in autopilot", () => {
-    const override = ctx({ policy: { mode: "autopilot", tagOverrides: { "publish.public": "allow" } } });
-    expect(bash("npm publish", override).verdict).toBe("warn"); // net.egress still warns
-    const remembered = ctx({ policy: { mode: "autopilot" }, remembered: [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: "publish.public", createdAt: "2026-01-01T00:00:00Z" }] });
-    expect(bash("npm publish", remembered).verdict).toBe("allow");
-    // Neither lifts a floor.
-    expect(bash("rm -rf /", remembered).verdict).toBe("deny");
+  it("irreversible or public actions are a floor: no tag override, remembered rule or session grant lowers them", () => {
+    const lift = (mode: ApprovalMode) => ctx({
+      policy: { mode, tagOverrides: { "publish.public": "allow", "vcs.force-push": "allow", "vcs.push": "allow", "net.egress": "allow", "fs.destroy": "allow" } },
+      projectIdHash: "p",
+      remembered: [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: "publish.public", createdAt: "2026-01-01T00:00:00Z" }],
+      sessionGrants: [{ sessionId: "s1", serverId: "builtin", toolName: "Bash", actionTag: "vcs.force-push", createdAt: "2026-01-01T00:00:00Z" }],
+    });
+    for (const cmd of ["npm publish", "git push --force"]) {
+      expect(MODES.map((m) => bash(cmd, lift(m)).verdict), cmd).toEqual(["ask", "ask", "deny"]);
+    }
+    // A tag override may still raise the floor to deny.
+    expect(bash("npm publish", ctx({ policy: { mode: "balanced", tagOverrides: { "publish.public": "deny" } } })).verdict).toBe("deny");
+    expect(bash("rm -rf /", lift("balanced")).verdict).toBe("deny");
   });
 
   it("Decision records the mode", () => {

@@ -1,6 +1,6 @@
-// Self-protection and sensitive paths (spec §7.2, §7.6), built-in tool profiles (§7.1).
+// Self-protection and sensitive paths, built-in tool profiles.
 import { describe, expect, it } from "vitest";
-import { builtin, ctx, ps, ruleIds, winCtx } from "../helpers.js";
+import { builtin, ctx, MODES, ps, ruleIds, winCtx } from "../helpers.js";
 
 describe("protected writes via file tools", () => {
   it.each([
@@ -48,13 +48,13 @@ describe("protected writes via file tools", () => {
     }
   });
 
-  it("caller-resolved realpaths are checked too (§7.6.4)", () => {
+  it("caller-resolved realpaths are checked too", () => {
     const c = ctx({ resolvedPaths: { "/home/u/proj/link.json": "/home/u/.claude/settings.json" } });
     expect(builtin("Write", { file_path: "/home/u/proj/link.json", content: "" }, c).verdict).toBe("deny");
   });
 });
 
-describe("Windows normalization (§7.6.3)", () => {
+describe("Windows normalization", () => {
   const W = (p: string) => builtin("Write", { file_path: p, content: "" }, winCtx());
   it.each([
     "C:\\Users\\u\\.claude\\settings.json",
@@ -113,7 +113,7 @@ describe("protected reads (I14)", () => {
   });
 });
 
-describe("sensitive reads (§7.2, AG-32)", () => {
+describe("sensitive reads", () => {
   it.each([
     "/home/u/.ssh/id_rsa",
     "/home/u/.aws/credentials",
@@ -137,7 +137,7 @@ describe("sensitive reads (§7.2, AG-32)", () => {
   });
 });
 
-describe("built-in tool profiles (§7.1)", () => {
+describe("built-in tool profiles", () => {
   it("read tools allow", () => {
     for (const t of ["Read", "Glob", "Grep", "LS", "WebSearch", "TodoWrite", "AskUserQuestion"]) {
       expect(builtin(t, { file_path: "/home/u/proj/a", pattern: "x", query: "q" }).actionRisk.level, t).toBe("read");
@@ -154,11 +154,20 @@ describe("built-in tool profiles (§7.1)", () => {
     expect(d.verdict).toBe("warn");
   });
 
-  it("Agent / Skill / unknown builtins are write-reversible exec.unknown", () => {
-    for (const t of ["Agent", "Task", "Skill", "Workflow", "SomeFutureTool"]) {
+  it("Agent / Task / Skill / Workflow start agent work: write-reversible, allowed", () => {
+    for (const t of ["Agent", "Task", "Skill", "Workflow"]) {
+      const d = builtin(t, { prompt: "x" });
+      expect(d.actionRisk.level, t).toBe("write-reversible");
+      expect(d.actionRisk.unanalyzable, t).toBe(false);
+      expect(d.verdict, t).toBe("allow");
+    }
+  });
+
+  it("an unknown built-in tool is unanalyzable: ask in strict and balanced, deny in autopilot", () => {
+    for (const t of ["SomeFutureTool", "RunScript"]) {
       const r = builtin(t, { prompt: "x" }).actionRisk;
-      expect(r.level, t).toBe("write-reversible");
-      expect(r.tags, t).toContain("exec.unknown");
+      expect(r.unanalyzable, t).toBe(true);
+      expect(MODES.map((mode) => builtin(t, { prompt: "x" }, ctx({ policy: { mode } })).verdict), t).toEqual(["ask", "ask", "deny"]);
     }
   });
 });

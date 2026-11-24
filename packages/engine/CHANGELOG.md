@@ -1,0 +1,41 @@
+# Changelog: @glassbox-ai/engine
+
+## 0.1.1 (unreleased)
+
+Stricter defaults. Some calls that 0.1.0 allowed now ask or deny.
+
+**Built-in tools**
+- New export `BUILTIN_TOOLS`: every built-in Claude Code tool from the current tools reference
+  (2.1.331), by category: `read`, `write`, `command`, `network`, `agent`, `other`.
+- `Monitor` runs shell commands, so its `command` gets the same analysis as `Bash`. A WebSocket
+  watch (`ws.url`) is network egress and records the host only.
+- **A built-in tool the engine doesn't know is now unanalyzable** (ask in strict and balanced,
+  deny in autopilot). In 0.1.0 it was allowed.
+- `Artifact` and `ShareOnboardingGuide` send content off the machine: high-risk `net.egress`.
+  `RemoteTrigger` starts agents in the cloud: `exec.nested-agent`, which asks.
+
+**Policy**
+- **Irreversible or public actions are a floor.** Force push, history rewrite, wipes, payments,
+  production deploys, publishing and the rest of the ruleset's irreversible tags ask in strict
+  and balanced and deny in autopilot. A `tagOverrides` entry can raise them to deny but no longer
+  lowers them, and remembered rules no longer lift them.
+- **Remembered rules are scoped to a project.** New `SessionContext.projectIdHash`; a remembered
+  rule applies only when its `projectIdHash` equals it. Without a `projectIdHash`, no remembered
+  rule applies.
+- **Session grants.** New `SessionContext.sessionGrants` (`SessionGrant`): permissions the user
+  granted for one session. They apply only when their `sessionId` equals the context's, and,
+  like remembered rules, lift mode-driven asks only.
+- Remembered rules and grants count only with their own string properties (inherited fields
+  don't), and at most 1,000 of each are read.
+
+**Self-protection**
+- The Glassbox CLI's protection-changing subcommands (`mode`, `allow`, `uninstall`, …) are now
+  caught however the CLI is launched: package runners (`npx`, `bunx`, `pnpx`, `pnpm dlx/exec`,
+  `npm exec`, `yarn dlx`) and interpreters running the CLI script directly. In 0.1.0,
+  `npx glassbox allow …` was allowed. New subcommand names `deny`, `forget` and `revoke` are
+  covered in advance.
+
+**Other**
+- Source comments no longer refer to internal design documents.
+- Releases are staged on npm by a GitHub Actions workflow and need the maintainer's 2FA
+  approval; they carry npm provenance. 0.1.0 was published from a local machine without it.
