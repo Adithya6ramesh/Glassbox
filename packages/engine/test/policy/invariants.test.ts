@@ -29,8 +29,10 @@ const withPolicy = (p: UserPolicy, base: SessionContext = ctx()): SessionContext
   sessionGrants: ALL_TAGS.map((actionTag) => ({ sessionId: base.sessionId, serverId: "builtin", toolName: "Bash", actionTag, createdAt: "2026-01-01T00:00:00Z" })),
 });
 
-/** Irreversible or public actions: a floor no remembered rule, session grant or override lowers. */
-const IRREVERSIBLE = ["git push --force", "git push origin +main", "git reset --hard", "git filter-branch --force HEAD", "npm publish", "vercel --prod", "terraform apply"];
+/** The hard floor (force push, history rewrite, wipes, payments, prod deploys, publishing): nothing the user set up lowers it. */
+const HARD_FLOOR = ["git push --force", "git push origin +main", "git filter-branch --force HEAD", "npm publish", "vercel --prod", "gh release create v1"];
+/** Other irreversible actions: ask by default in every mode, but a remembered rule or grant may lift them. */
+const LIFTABLE_IRREVERSIBLE = ["git reset --hard", "terraform apply", "gh pr create -t x -b y", "chmod -R 777 .", "claude -p hi", "git config core.hooksPath .h"];
 
 const CRITICAL = ["rm -rf /", "rm -rf ~", "dd if=/dev/zero of=/dev/sda"];
 const PROTECTED = [
@@ -74,13 +76,21 @@ describe("floors hold under every user policy (property)", () => {
       const c = withPolicy({ mode });
       // Sanity: the hostile rules are live. In strict, a reversible high-risk call is lifted to allow.
       if (mode === "strict") expect(bash("curl https://example.com", c).verdict).toBe("allow");
-      for (const cmd of IRREVERSIBLE) expect(bash(cmd, c).verdict, `${mode} ${cmd}`).toBe(mode === "autopilot" ? "deny" : "ask");
+      for (const cmd of HARD_FLOOR) expect(bash(cmd, c).verdict, `${mode} ${cmd}`).toBe(mode === "autopilot" ? "deny" : "ask");
+      // Lifted only because the hostile context remembers every tag; without it they ask (next test).
+      for (const cmd of LIFTABLE_IRREVERSIBLE) expect(["allow", "warn"], `${mode} ${cmd}`).toContain(bash(cmd, c).verdict);
       for (const cmd of [...CRITICAL, ...PROTECTED]) expect(bash(cmd, c).verdict, `${mode} ${cmd}`).toBe("deny");
       for (const cmd of UNANALYZABLE) expect(["ask", "deny"], `${mode} ${cmd}`).toContain(bash(cmd, c).verdict);
     }
   });
 
-  it("disabling a non-suppressible rule has no effect", () => {
+  it("liftable irreversible actions still ask by default in every mode (deny in autopilot)", () => {
+    for (const cmd of LIFTABLE_IRREVERSIBLE) {
+      expect(MODES.map((mode) => bash(cmd, ctx({ policy: { mode } })).verdict), cmd).toEqual(["ask", "ask", "deny"]);
+    }
+  });
+
+    it("disabling a non-suppressible rule has no effect", () => {
     const c = ctx({ policy: { mode: "balanced", disabledRules: ["CP-SELF-001", "CP-SHELL-001", "CP-ACTION-001"] } });
     expect(ruleIds(bash("rm -rf /", c))).toContain("CP-ACTION-001");
     expect(ruleIds(bash("eval x", c))).toContain("CP-SHELL-001");

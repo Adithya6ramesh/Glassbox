@@ -1367,8 +1367,13 @@ function gh(args: WordInfo[], c: Ctx2): void {
   acc.network = true;
   const vals = args.map((a) => a.value ?? "");
   const [a, b] = operands(args, new Set(["-R", "--repo", "-t", "--title", "-b", "--body", "-F", "--body-file", "-m", "--milestone", "-l", "--label", "-a", "--assignee", "-B", "--base", "-H", "--head", "-L", "--limit", "-q", "--jq", "--json", "-r", "--reviewer", "-n", "--notes"])).map((x) => x.value ?? "");
-  const publish = (a === "pr" && ["create", "comment", "merge", "review", "close", "reopen", "edit", "ready"].includes(b ?? "")) ||
-    (a === "issue" && ["create", "comment", "close", "reopen", "edit", "delete", "transfer", "lock"].includes(b ?? "")) ||
+  // Pull requests and issues are conversations with the repo's collaborators: message.send
+  // (asks by default; can be remembered). Releases, gists, repos, secrets and workflows publish
+  // or change what others get: publish.public (hard floor).
+  const message = (a === "pr" && ["create", "comment", "merge", "review", "close", "reopen", "edit", "ready"].includes(b ?? "")) ||
+    (a === "issue" && ["create", "comment", "close", "reopen", "edit", "delete", "transfer", "lock"].includes(b ?? ""));
+  if (message) { acc.tags.add("message.send"); acc.reason("posts or changes a pull request or issue on GitHub"); }
+  const publish =
     (a === "release" && ["create", "upload", "edit", "delete"].includes(b ?? "")) ||
     (a === "gist" && ["create", "edit", "delete"].includes(b ?? "")) ||
     (a === "repo" && ["create", "delete", "edit", "rename", "archive", "fork"].includes(b ?? "")) ||

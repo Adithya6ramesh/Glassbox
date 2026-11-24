@@ -15,10 +15,16 @@ Stricter defaults. Some calls that 0.1.0 allowed now ask or deny.
   `RemoteTrigger` starts agents in the cloud: `exec.nested-agent`, which asks.
 
 **Policy**
-- **Irreversible or public actions are a floor.** Force push, history rewrite, wipes, payments,
-  production deploys, publishing and the rest of the ruleset's irreversible tags ask in strict
-  and balanced and deny in autopilot. A `tagOverrides` entry can raise them to deny but no longer
-  lowers them, and remembered rules no longer lift them.
+- **Hard floor.** Force push, history rewrite, wipes, payments, production deploys and publishing
+  (new export `HARD_FLOOR_TAGS`) ask in strict and balanced and deny in autopilot, whatever the
+  user set up and whatever the ruleset says: a `tagOverrides` entry can only raise them to deny,
+  and remembered rules and session grants never lift them.
+- The other irreversible-or-public actions (discarding changes, schema or unscoped database
+  writes, infrastructure changes, sending messages, permission changes, files that run commands
+  later, nested agents) still ask in every mode by default, but stay liftable as in 0.1.0.
+- `gh pr …` and `gh issue …` writes are now `message.send` instead of `publish.public`: they
+  still ask by default, and can be remembered. Releases, gists, repository changes and
+  `gh api` writes stay `publish.public` (hard floor).
 - **Remembered rules are scoped to a project.** New `SessionContext.projectIdHash`; a remembered
   rule applies only when its `projectIdHash` equals it. Without a `projectIdHash`, no remembered
   rule applies.

@@ -23,6 +23,8 @@ export * from "./types.js";
 
 /** Built-in Claude Code tools the engine knows, by category. Any other built-in tool is unanalyzable. */
 export { BUILTIN_TOOLS } from "./action/builtin-tools.js";
+/** Actions that always ask (deny in autopilot), whatever the user set up or the ruleset says. */
+export { HARD_FLOOR_TAGS } from "./policy/decide.js";
 
 export const ENGINE_VERSION: string = VERSION;
 export const EMBEDDED_BASELINE: LoadedRuleset = BASELINE;

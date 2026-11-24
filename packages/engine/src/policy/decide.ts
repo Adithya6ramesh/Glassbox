@@ -28,15 +28,25 @@ export interface DecideInput {
 export interface DecideOutput { verdict: Verdict; verdictBeforeMode?: Verdict }
 
 /**
- * R3 by mode. Other high-risk tags: strict asks, balanced and autopilot warn.
- * Irreversible-or-public tags (force push, history rewrite, wipes, payments, production
- * deploys, publishing, …) are a floor: they ask in every mode, and autopilot turns that into
- * deny (R15). Nothing the user set up earlier lowers them: a tagOverride can only raise them to
- * deny, and remembered rules and session grants never lift them.
+ * R3 by mode.
+ * - Hard floor (HARD_FLOOR_TAGS, whatever the ruleset says): force push,
+ *   history rewrite, wipes, payments, production deploys and publishing ask in every mode, and
+ *   autopilot turns that into deny (R15). Nothing the user set up earlier lowers them: a
+ *   tagOverride can only raise them to deny; remembered rules and session grants never lift them.
+ * - Other irreversible-or-public tags ask in every mode by default, but they are ordinary
+ *   mode asks: a tagOverride, remembered rule or session grant can lift them.
+ * - Other high-risk tags: strict asks, balanced and autopilot warn.
  */
-function modeVerdict(mode: ApprovalMode): Verdict {
+function modeVerdict(tag: ActionTag | null, mode: ApprovalMode, irreversible: ReadonlySet<ActionTag>): Verdict {
+  if (tag !== null && irreversible.has(tag)) return "ask";
   return mode === "strict" ? "ask" : "warn";
 }
+
+/** Fixed in the engine, not in the ruleset: no ruleset can remove a tag from the hard floor. */
+export const HARD_FLOOR_TAGS: readonly ActionTag[] = Object.freeze(["vcs.force-push", "vcs.history-rewrite", "fs.destroy", "payment", "deploy.prod", "publish.public"] as ActionTag[]);
+// Private copy used for decisions: a Set can't be frozen, so the exported list is a frozen array
+// and changing anything a caller can reach doesn't change the floor.
+const HARD_FLOOR: ReadonlySet<ActionTag> = new Set(HARD_FLOOR_TAGS);
 
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
@@ -57,7 +67,7 @@ export function decide(d: DecideInput): DecideOutput {
   const irreversible = new Set(d.ruleset.irreversibleTags);
 
   // R3 (calls only): high-risk action, by mode, then tagOverrides, then remembered rules and
-  // session grants (mode-driven asks only, never the irreversible floor).
+  // session grants (mode-driven asks only, never the hard floor).
   if (d.kind === "call" && d.risk.level === "high-risk") {
     const tags = d.risk.tags.filter((t) => t !== "self-protection");
     let r3: Verdict = "allow";
@@ -67,11 +77,11 @@ export function decide(d: DecideInput): DecideOutput {
     for (const t of list) {
       const o = t !== null ? d.policy.tagOverrides?.[t] : undefined;
       let tv: Verdict;
-      if (t !== null && irreversible.has(t)) {
+      if (t !== null && HARD_FLOOR.has(t)) {
         tv = o === "deny" ? "deny" : "ask";
         if (tv === "ask") floorAsk = true;
       } else {
-        tv = modeVerdict(mode);
+        tv = modeVerdict(t, mode, irreversible);
         if (o === "allow" || o === "ask" || o === "deny") tv = o;
         if (tv === "ask" && t !== null) liftable.push(t);
       }

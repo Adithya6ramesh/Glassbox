@@ -2,7 +2,7 @@
 // the irreversible floor, project-scoped remembered rules and session grants.
 // The agent is assumed hostile (prompt-injected).
 import { describe, expect, it } from "vitest";
-import { checkToolCall, type SessionContext } from "../../src/index.js";
+import { EMBEDDED_BASELINE, HARD_FLOOR_TAGS, checkToolCall, type SessionContext } from "../../src/index.js";
 import { bash, builtin, ctx, MODES, ruleIds } from "../helpers.js";
 
 const T = "2026-01-01T00:00:00Z";
@@ -184,5 +184,43 @@ describe("session grants", () => {
   it("RT-111-23: grants reach the engine only through the context, not the tool input", () => {
     const d = checkToolCall({ serverId: "builtin", toolName: "Bash", arguments: { command: "curl https://example.com", sessionGrants: [grant] } }, strict({}));
     expect(d.verdict).toBe("ask");
+  });
+});
+
+describe("hard floor vs liftable irreversible actions", () => {
+  const remember = (actionTag: string, mode: "strict" | "balanced" | "autopilot" = "balanced") => ctx({
+    policy: { mode }, projectIdHash: "p",
+    remembered: [{ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag: actionTag as never, createdAt: T }],
+  });
+
+  it("RT-111-26: a pull request can be remembered; a release can't", () => {
+    expect(bash("gh pr create -t x -b y", remember("message.send")).verdict).not.toBe("ask");
+    expect(bash("gh release create v1", remember("publish.public")).verdict).toBe("ask");
+    expect(bash("gh release create v1", remember("publish.public", "autopilot")).verdict).toBe("deny");
+  });
+
+  it("RT-111-27: remembering the PR tag doesn't lift a release, a repo change or a gh api write", () => {
+    for (const cmd of ["gh release create v1", "gh repo create acme/x --public", "gh api -X POST repos/acme/x/releases", "gh pr create -t x -b y && npm publish"]) {
+      expect(bash(cmd, remember("message.send")).verdict, cmd).toBe("ask");
+    }
+  });
+
+  it("RT-111-28: a ruleset that drops hard-floor tags from its irreversible list doesn't remove the floor", () => {
+    const weak = { ...EMBEDDED_BASELINE, irreversibleTags: [] };
+    for (const cmd of ["git push --force", "npm publish", "vercel --prod"]) {
+      expect(MODES.map((mode) => bash(cmd, ctx({ policy: { mode }, ruleset: weak })).verdict), cmd).toEqual(["ask", "ask", "deny"]);
+    }
+  });
+
+  it("RT-111-30: the exported hard-floor list can't be changed, and isn't what the engine decides with", () => {
+    expect(Object.isFrozen(HARD_FLOOR_TAGS)).toBe(true);
+    expect(() => (HARD_FLOOR_TAGS as unknown as string[]).splice(0)).toThrow();
+    expect([...HARD_FLOOR_TAGS].sort()).toEqual(["deploy.prod", "fs.destroy", "payment", "publish.public", "vcs.force-push", "vcs.history-rewrite"]);
+  });
+
+  it("RT-111-29: a liftable tag remembered doesn't lift a hard-floor tag on the same command", () => {
+    // git push --force carries vcs.force-push (hard) and vcs.push / net.egress.
+    const c = ctx({ policy: { mode: "balanced" }, projectIdHash: "p", remembered: (["vcs.push", "net.egress", "vcs.discard-changes"] as const).map((actionTag) => ({ projectIdHash: "p", serverId: "builtin", toolName: "Bash", actionTag, createdAt: T })) });
+    expect(bash("git push --force", c).verdict).toBe("ask");
   });
 });

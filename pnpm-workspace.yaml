@@ -1,7 +1,7 @@
 packages:
   - packages/*
 
-# Supply-chain settings (pnpm 12). Policy summary: CLAUDE.md, Dependencies.
+# Supply-chain settings (pnpm 12).
 # Dependency lifecycle scripts never run. Nothing is listed in allowBuilds,
 # and strictDepBuilds makes the install FAIL if any dependency has a build
 # script (ERR_PNPM_IGNORED_BUILDS). `ignoreScripts: true` is deliberately NOT
