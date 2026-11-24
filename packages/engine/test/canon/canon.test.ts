@@ -1,4 +1,4 @@
-// Canonicalization (spec §5): views, offsets, idempotence (P1), intake (C0–C2).
+// Canonicalization: views, offsets, idempotence (P1), intake (C0–C2).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { buildViews } from "../../src/canon/views.js";

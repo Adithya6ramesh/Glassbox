@@ -1,4 +1,4 @@
-// Invariant I7 (engine-spec §13), lint half: banned modules, globals and syntax in
+// Invariant I7, lint half: banned modules, globals and syntax in
 // packages/engine/src are rejected. Each case is a red-team attempt (Phase 0 Step 2).
 import { ESLint } from "eslint";
 import { fileURLToPath } from "node:url";

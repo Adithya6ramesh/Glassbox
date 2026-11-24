@@ -1,3 +1,3 @@
 # Baseline rules
 
-Rule JSON files (engine-spec §10.1) go here from Step 4. Data only, no code.
+Rule JSON files: data only, no code. `scripts/build.mjs` builds them into the engine's embedded baseline.

@@ -1,4 +1,4 @@
-// redact() (engine-spec §8.2): deep copy with every detected secret masked.
+// redact(): deep copy with every detected secret masked.
 // Unscanned content is replaced, never passed through raw.
 import { findDecodable } from "../canon/decode.js";
 import { resolveLimits } from "../limits.js";

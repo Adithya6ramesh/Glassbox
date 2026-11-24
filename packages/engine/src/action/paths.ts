@@ -1,4 +1,4 @@
-// Path normalization and the protected / protected-read / sensitive sets (engine-spec §7.2, §7.6).
+// Path normalization and the protected / protected-read / sensitive sets.
 // Purely lexical: the engine can't see the filesystem.
 import { trimEndChars } from "../util/misc.js";
 import { JOB_LABEL, type JobKind } from "./schedule.js";

@@ -1,4 +1,4 @@
-// C3 (engine-spec §5.3): field enumeration with roles, per surface. Iterative.
+// C3: field enumeration with roles, per surface. Iterative.
 import { jcs } from "../util/jcs.js";
 import { isRecord, ptrSeg } from "../util/misc.js";
 
@@ -54,7 +54,7 @@ function schemaRole(path: string[], isKey: boolean): string {
 export function manifestFields(m: unknown, maxTools: number): Field[] {
   const out: Field[] = [];
   walk(m, "", (w, isKey) => {
-    // "key~dupN" (a duplicated JSON key, §5.2) takes the role of "key".
+    // "key~dupN" takes the role of "key".
     const p = w.path.map((seg) => seg.replace(/~dup\d+$/, ""));
     let role = "manifest.other";
     let toolIndex: number | undefined;
@@ -76,7 +76,7 @@ export function manifestFields(m: unknown, maxTools: number): Field[] {
     if (isKey && (role === "manifest.other" || role === "tool.key" || role === "tool.other" || role === "tool.annotation" || role === "server.info" || role === "prompt.text" || role === "resource.text")) return;
     out.push({ pointer: w.pointer, kind: isKey ? "key" : "string", role, text: String(w.v), keyName: w.key, ...(toolIndex !== undefined ? { toolIndex } : {}) });
   });
-  // Non-string enum/default/const values are scanned in JCS form (§5.3).
+  // Non-string enum/default/const values are scanned in JCS form.
   const tools = isRecord(m) && Array.isArray(m["tools"]) ? (m["tools"] as unknown[]) : [];
   tools.slice(0, maxTools).forEach((t, ti) => {
     for (const s of ["inputSchema", "outputSchema"]) {

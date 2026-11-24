@@ -1,4 +1,4 @@
-// Redaction and evidence (spec §8): P4, P5, masking formats, renderForModel forging (RT-6).
+// Redaction and evidence: P4, P5, masking formats, renderForModel forging (RT-6).
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { analyzeServer, redact, renderForModel, type Finding } from "../../src/index.js";
@@ -112,7 +112,7 @@ describe("P5: evidence alphabet and length", () => {
   });
 });
 
-describe("renderForModel (§8.5, RT-6)", () => {
+describe("renderForModel", () => {
   const f = (over: Partial<Finding>): Finding => ({
     id: "0123456789abcdef", ruleId: "CP-POISON-001", ruleSource: "baseline", category: "tool-poisoning",
     severity: "high", confidence: 0.9, location: "/tools/0/description", evidence: '"x"',

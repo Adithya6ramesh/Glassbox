@@ -1,5 +1,5 @@
-// PowerShell analysis (engine-spec §7.4, rev 3/4): hand-written tokenizer, alias table,
-// cmdlet classes; native programs go through the §7.3 command table.
+// PowerShell analysis: hand-written tokenizer, alias table,
+// cmdlet classes; native programs go through the shell command table.
 import { Acc } from "./acc.js";
 import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";

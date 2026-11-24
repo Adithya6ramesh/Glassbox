@@ -1,4 +1,4 @@
-// C1–C2 (engine-spec §5.2): strict, bounded, iterative JSON parser.
+// C1–C2: strict, bounded, iterative JSON parser.
 // - builds null-prototype objects; __proto__/constructor/prototype are plain data (CP-PARSE-003)
 // - duplicate keys are kept as "key~dupN" (CP-PARSE-001)
 // - lone surrogates (escaped or raw) are flagged (CP-PARSE-005)

@@ -1,4 +1,4 @@
-// Linear-time regex (engine-spec §10.3): every pattern applied to untrusted text goes
+// Linear-time regex: every pattern applied to untrusted text goes
 // through re2js. Compiled patterns are cached per pattern string (bounded cache).
 import { RE2JS } from "re2js";
 import { initTimed } from "./initclock.js";

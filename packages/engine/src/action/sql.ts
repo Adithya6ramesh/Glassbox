@@ -1,4 +1,4 @@
-// SQL tokenizer and classifier (engine-spec §7.5). Linear, no regex on input.
+// SQL tokenizer and classifier. Linear, no regex on input.
 import { Acc } from "./acc.js";
 
 interface Tok { k: "word" | "str" | "num" | "punct"; v: string }

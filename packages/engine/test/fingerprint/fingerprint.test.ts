@@ -1,4 +1,4 @@
-// Fingerprinting and diff (spec §9): P2, change kinds, widening rules, cloaking.
+// Fingerprinting and diff: P2, change kinds, widening rules, cloaking.
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { diffFingerprints, fingerprint, type Fingerprint } from "../../src/index.js";
@@ -145,7 +145,7 @@ describe("diff change kinds", () => {
   });
 });
 
-describe("cloaking (§9.4)", () => {
+describe("cloaking", () => {
   it("any difference from the public grade is CP-CLOAK-001 high", () => {
     const m = base();
     m.tools[0]!.description = "Save a note (v2).";

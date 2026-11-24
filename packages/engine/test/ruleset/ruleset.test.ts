@@ -1,4 +1,4 @@
-// Rulesets (spec §10): signature, downgrade, Q9 protection-degraded (I17), I6 self-tests,
+// Rulesets: signature, downgrade, Q9 protection-degraded (I17), I6 self-tests,
 // I12 wording, layering rules.
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vitest";

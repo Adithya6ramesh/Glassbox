@@ -1,6 +1,6 @@
-// Interpreter inline code (engine-spec §7.3 interpreter row, Q6 rev 4).
+// Interpreter inline code.
 // A token heuristic: obfuscation markers → unanalyzable; dangerous tokens → high-risk;
-// otherwise write-reversible. Bypassable by design (threat-model §7 #13).
+// otherwise write-reversible. Bypassable by design.
 import { test } from "../util/re.js";
 
 export interface InlineVerdict {

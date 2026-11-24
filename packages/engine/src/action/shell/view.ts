@@ -1,4 +1,4 @@
-// T-DIFF support (engine-spec §13): the parser's view of which commands a shell string
+// T-DIFF support: the parser's view of which commands a shell string
 // runs, as argv lists. Unknown words are null (they match zero or more real words).
 import { analyzeShellCommand, wordInfo } from "./analyze.js";
 import { parseShell, type Part, type Script, type SimpleCommand, type Word } from "./parse.js";

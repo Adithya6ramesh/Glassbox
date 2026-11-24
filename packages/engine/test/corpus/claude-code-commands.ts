@@ -1,4 +1,4 @@
-// T-CORPUS (spec §13): commands of the kind Claude Code actually runs. Written by hand from
+// T-CORPUS: commands of the kind Claude Code actually runs. Written by hand from
 // public Claude Code docs and common workflows, then expanded with realistic variants.
 // No real user data. Each entry says what balanced mode should do with it.
 

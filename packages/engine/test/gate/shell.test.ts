@@ -1,4 +1,4 @@
-// Shell classification through checkToolCall (spec §7.3), including Q5 substitution
+// Shell classification through checkToolCall, including Q5 substitution
 // rules (invariant I18), Q6 inline code (I20) and the AG-30 obfuscation table.
 import { describe, expect, it } from "vitest";
 import { acrossModes, bash, ctx, ruleIds } from "../helpers.js";
@@ -67,7 +67,10 @@ describe("high-risk commands and modes", () => {
     ["git checkout -- src/index.ts", "vcs.discard-changes"],
     ["git clean -fdx", "fs.delete"],
     ["npm publish", "publish.public"],
-    ["gh pr create --title x --body y", "publish.public"],
+    ["gh pr create --title x --body y", "message.send"],
+    ["gh issue comment 3 --body y", "message.send"],
+    ["gh release create v1.0.0", "publish.public"],
+    ["gh repo create acme/x --public", "publish.public"],
     ["vercel --prod", "deploy.prod"],
     ["terraform apply -auto-approve", "infra.change"],
     ["kubectl delete ns prod", "infra.change"],

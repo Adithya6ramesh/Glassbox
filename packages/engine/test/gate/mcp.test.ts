@@ -1,4 +1,4 @@
-// MCP tool classification (spec §7.1 step 3), SQL (§7.5), token audience (CP-EXFIL-050),
+// MCP tool classification, SQL, token audience (CP-EXFIL-050),
 // secrets in arguments, and parseClaudeCodeToolName.
 import { describe, expect, it } from "vitest";
 import { classifyAction, parseClaudeCodeToolName } from "../../src/index.js";
@@ -56,7 +56,7 @@ describe("MCP vocabulary profile", () => {
   });
 });
 
-describe("SQL (§7.5)", () => {
+describe("SQL", () => {
   const sql = (query: string) => mcp("execute_sql", { query });
   it.each([
     ["SELECT * FROM users WHERE id = 1", "read"],

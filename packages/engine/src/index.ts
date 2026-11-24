@@ -1,4 +1,4 @@
-// @glassbox-ai/engine public API (engine-spec §4). Every function is synchronous, pure and
+// @glassbox-ai/engine public API. Every function is synchronous, pure and
 // total: none of them throws, and a failure never becomes a silent allow.
 import { classifyBuiltin, classifyMcp } from "./action/tools.js";
 import { pathCtxFrom } from "./action/paths.js";
@@ -21,10 +21,15 @@ import { resolveLimits } from "./limits.js";
 
 export * from "./types.js";
 
+/** Built-in Claude Code tools the engine knows, by category. Any other built-in tool is unanalyzable. */
+export { BUILTIN_TOOLS } from "./action/builtin-tools.js";
+/** Actions that always ask (deny in autopilot), whatever the user set up or the ruleset says. */
+export { HARD_FLOOR_TAGS } from "./policy/decide.js";
+
 export const ENGINE_VERSION: string = VERSION;
 export const EMBEDDED_BASELINE: LoadedRuleset = BASELINE;
 
-/** The only wording a grade may be presented with (engine-spec §9a). */
+/** The only wording a grade may be presented with. */
 export const GRADE_SCOPE_STATEMENT = "A grade checks what a server says about its tools. It doesn't inspect the server's code.";
 
 const t = (): number => performance.now();

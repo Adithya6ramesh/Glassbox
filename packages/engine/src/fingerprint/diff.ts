@@ -1,4 +1,4 @@
-// Fingerprint diff (engine-spec §9.3) and the cloaking check (§9.4).
+// Fingerprint diff and the cloaking check.
 import { FindingFactory } from "../analysis/findings.js";
 import { displayTokens } from "../evidence/evidence.js";
 import { EMBEDDED_BASELINE } from "../ruleset/baseline.js";

@@ -1,4 +1,4 @@
-// Fingerprints (engine-spec §9.1–9.2): SHA-256 over RFC 8785 canonical JSON of the snapshot.
+// Fingerprints: SHA-256 over RFC 8785 canonical JSON of the snapshot.
 import type { Fingerprint, ItemFingerprint, Limits, ToolFingerprint } from "../types.js";
 import { sha256Hex } from "../util/hash.js";
 import { jcs } from "../util/jcs.js";

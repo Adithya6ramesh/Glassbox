@@ -1,4 +1,4 @@
-// Ruleset payload schema (engine-spec §10.1–10.2), validated with valibot.
+// Ruleset payload schema, validated with valibot.
 import * as v from "valibot";
 import { ACTION_TAGS, type Matcher } from "../types.js";
 

@@ -1,4 +1,4 @@
-// Public types (engine-spec §4). Kept free of logic.
+// Public types. Kept free of logic.
 
 export type Verdict = "allow" | "warn" | "ask" | "deny";
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
@@ -171,8 +171,28 @@ export interface ServerRequestInput {
   message: unknown;
 }
 
+/** What a built-in agent tool can do (see BUILTIN_TOOLS). */
+export type BuiltinToolCategory = "read" | "write" | "command" | "network" | "agent" | "other";
+
+/**
+ * "Allow & remember", set by the user outside the agent. Applies only in the project whose
+ * `projectIdHash` equals `SessionContext.projectIdHash`. Lifts a mode-driven ask only: never an
+ * irreversible-or-public ask, a finding ≥ high, or any locked row.
+ */
 export interface RememberedRule {
   projectIdHash: string;
+  serverId: string;
+  toolName: string;
+  actionTag: ActionTag;
+  createdAt: string;
+}
+
+/**
+ * A permission the user granted for one session (`glassbox allow --session …`), outside the agent.
+ * Applies only when `sessionId` equals `SessionContext.sessionId`; same limits as RememberedRule.
+ */
+export interface SessionGrant {
+  sessionId: string;
   serverId: string;
   toolName: string;
   actionTag: ActionTag;
@@ -198,7 +218,10 @@ export interface SessionContext {
   platform: "linux" | "darwin" | "win32";
   claudeConfigDir?: string;
   glassboxSecretPaths?: readonly string[];
+  /** The current project's id (caller-computed, e.g. HMAC of the project root). Remembered rules need it. */
+  projectIdHash?: string;
   remembered?: readonly RememberedRule[];
+  sessionGrants?: readonly SessionGrant[];
   homeDir: string;
   cwd: string;
   caseInsensitiveFs: boolean;

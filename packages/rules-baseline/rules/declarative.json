@@ -1,5 +1,5 @@
 {
-  "$comment": "Declarative baseline rules. Fake credentials in test strings are {{fake:<type>}} placeholders expanded at test time (engine src/ruleset/fakes.ts), so no credential-shaped literal is committed. `as` says where test strings are placed: tool.description, schema.description, schema.enum, result.text, srvreq.sampling, srvreq.elicitation. pos/neg are expanded into RuleTestCase inputs by scripts/build.mjs. Explanations are static text and must not overclaim (engine-spec §9a).",
+  "$comment": "Declarative baseline rules. Fake credentials in test strings are {{fake:<type>}} placeholders expanded at test time (engine src/ruleset/fakes.ts), so no credential-shaped literal is committed. `as` says where test strings are placed: tool.description, schema.description, schema.enum, result.text, srvreq.sampling, srvreq.elicitation. pos/neg are expanded into RuleTestCase inputs by scripts/build.mjs. Explanations are static text and must not overclaim.",
   "manifestText": [
     "server.instructions",
     "tool.title",

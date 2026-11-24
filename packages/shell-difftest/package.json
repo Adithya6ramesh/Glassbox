@@ -2,7 +2,7 @@
   "name": "@glassbox-ai/shell-difftest",
   "version": "0.0.0",
   "private": true,
-  "description": "Test-only: differential tests of the engine's shell parser against real bash (engine-spec §13 T-DIFF). Never published; may use child_process.",
+  "description": "Test-only: differential tests of the engine's shell parser against real bash. Never published; may use child_process.",
   "license": "Apache-2.0",
   "type": "module",
   "dependencies": {

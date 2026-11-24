@@ -13,7 +13,7 @@ const enginePkg = JSON.parse(readFileSync(join(engineDir, "package.json"), "utf8
   scripts?: Record<string, string>;
 };
 
-// Changing this list needs a matching entry in the dependency notes (dependencies.md, kept in the private docs).
+// Adding a runtime dependency needs a reviewed reason: exact version, at least 14 days old, no install scripts.
 const ALLOWED_RUNTIME_DEPS = ["@noble/curves", "@noble/hashes", "re2js", "valibot"];
 const INSTALL_HOOKS = ["preinstall", "install", "postinstall", "prepare"];
 

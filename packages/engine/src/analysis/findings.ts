@@ -1,4 +1,4 @@
-// Finding construction (engine-spec §4.1, §8.3) and the rule-metadata lookup.
+// Finding construction and the rule-metadata lookup.
 import { makeEvidence } from "../evidence/evidence.js";
 import type { Category, Finding, LoadedRuleset, RuleDef, Severity, ViaKind } from "../types.js";
 import { sha256Hex } from "../util/hash.js";

@@ -1,4 +1,4 @@
-// Hand-written bash/sh parser (engine-spec §7.3, Q2). Recursive descent over a defined
+// Hand-written bash/sh parser. Recursive descent over a defined
 // subset, bounded (bytes, nesting, tokens). Anything outside the subset → unanalyzable.
 
 export const MAX_NESTING = 8;
