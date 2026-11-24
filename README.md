@@ -1,11 +1,17 @@
 # Glassbox
 
+[![npm version](https://img.shields.io/npm/v/@glassbox-ai/engine.svg)](https://www.npmjs.com/package/@glassbox-ai/engine)
+
 Glassbox checks what an AI agent is about to do and what it reads. For each step it answers
 allow, warn, ask or deny. It also grades MCP servers from their metadata.
 
 **Status: early, v0.1.** This repository holds the engine, `@glassbox-ai/engine`: a library with
 no I/O. It doesn't hook into an agent by itself yet. An integration for Claude Code comes
 next. Expect the API and the rules to change.
+
+```sh
+npm install @glassbox-ai/engine
+```
 
 ## What it checks
 

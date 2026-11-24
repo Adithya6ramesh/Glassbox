@@ -1,5 +1,7 @@
 # @glassbox-ai/engine
 
+[![npm version](https://img.shields.io/npm/v/@glassbox-ai/engine.svg)](https://www.npmjs.com/package/@glassbox-ai/engine)
+
 Checks what an AI agent is about to do and what it reads. For each step it answers allow,
 warn, ask or deny. It also grades MCP servers from their metadata. It's a library with no I/O;
 it is deterministic and never throws.
