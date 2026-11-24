@@ -35,6 +35,13 @@ Stricter defaults. Some calls that 0.1.0 allowed now ask or deny.
   `npx glassbox allow …` was allowed. New subcommand names `deny`, `forget` and `revoke` are
   covered in advance.
 
+**Signed rulesets**
+- The first production signing key is embedded: `gbx-2026-a` (Ed25519; SHA-256 of the raw public
+  key `67872a7d…799f62a0`). Rulesets signed with it are accepted; anything else still falls back
+  to the embedded baseline. The private key is held offline by the maintainer.
+- Verification uses a private copy of the key list, so changing the bytes of the exported
+  `EMBEDDED_TRUSTED_KEYS` doesn't change which keys are trusted.
+
 **Other**
 - Source comments no longer refer to internal design documents.
 - Releases are staged on npm by a GitHub Actions workflow and need the maintainer's 2FA

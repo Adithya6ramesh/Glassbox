@@ -13,11 +13,26 @@ import { EnvelopeSchema, PayloadSchema, type RulesetPayload } from "./schema.js"
 import { runRuleSelfTests } from "./selftest.js";
 
 /**
- * Trusted signing keys embedded in the engine build. Empty until the first production
- * key is created at release time: until then every signed cache is rejected and the
- * embedded baseline is used (the fail-safe direction).
+ * Trusted signing keys embedded in the engine build (Ed25519, raw 32-byte public keys).
+ * The private keys are held offline by the maintainer and are never on a server, in CI or in
+ * this repository. Rotation: a release adds the new key, rulesets are re-signed, and a later
+ * release lists the old keyId in REVOKED_KEY_IDS.
+ *
+ * gbx-2026-a: created 2026-11-25. SHA-256 of the raw key:
+ * 67872a7dd309ddc3c7eb69e20a67125c77767673976bae97149ec782799f62a0
  */
-export const EMBEDDED_TRUSTED_KEYS: readonly TrustedKey[] = Object.freeze([]);
+const TRUSTED: readonly TrustedKey[] = Object.freeze([
+  Object.freeze({
+    keyId: "gbx-2026-a",
+    publicKey: new Uint8Array([190, 180, 255, 177, 167, 215, 118, 25, 172, 139, 36, 151, 55, 199, 138, 140, 220, 236, 181, 189, 112, 11, 85, 89, 56, 26, 137, 165, 154, 237, 99, 79]),
+  }),
+]);
+
+/**
+ * A copy for callers to inspect. Typed arrays can't be frozen, so verification uses the
+ * private list above: changing these bytes doesn't change which keys the engine trusts.
+ */
+export const EMBEDDED_TRUSTED_KEYS: readonly TrustedKey[] = Object.freeze(TRUSTED.map((k) => Object.freeze({ keyId: k.keyId, publicKey: k.publicKey.slice() })));
 export const REVOKED_KEY_IDS: readonly string[] = Object.freeze([]);
 
 const DOMAIN = utf8("glassbox-ruleset-v1\u0000");
@@ -94,7 +109,7 @@ export function buildLoaded(payload: RulesetPayload, now: string, extra: Partial
 
 export function loadRuleset(envelope: Uint8Array | string, opts: LoadRulesetOptions): LoadedRuleset {
   try {
-    const keys = opts?.trustedKeys ?? EMBEDDED_TRUSTED_KEYS;
+    const keys = opts?.trustedKeys ?? TRUSTED;
     const minSequence = typeof opts?.minSequence === "number" ? opts.minSequence : 0;
     const now = typeof opts?.now === "string" ? opts.now : "";
     const size = typeof envelope === "string" ? envelope.length : envelope instanceof Uint8Array ? envelope.length : -1;
