@@ -2,8 +2,8 @@
 // Process wrapper around runHook: deadline first, then a capped stdin read, then the reply.
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { parseArgs } from "./args.js";
+import { glassboxHomeOf } from "./paths.js";
 import { failReply } from "./failrules.js";
 import { blockingReasonOf, writeReply, type Reply } from "./reply.js";
 import { runHook } from "./run.js";
@@ -44,7 +44,7 @@ process.stdin.on("end", () => {
   try {
     finish(runHook(event ?? "", Buffer.concat(chunks).toString("utf8"), {
       homeDir,
-      glassboxHome: path.join(homeDir, ".glassbox"),
+      glassboxHome: glassboxHomeOf(homeDir),
       platform,
       pluginRoot: process.env["CLAUDE_PLUGIN_ROOT"] || undefined,
       claudeConfigDir: process.env["CLAUDE_CONFIG_DIR"] || undefined,

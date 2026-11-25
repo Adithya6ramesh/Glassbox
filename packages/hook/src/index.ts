@@ -1,5 +1,6 @@
 // @glassbox-ai/hook: library surface (the process entry point is main.ts).
 export { parseArgs } from "./args.js";
+export { compileCacheDir, glassboxHomeOf } from "./paths.js";
 export { buildContext, loadConfig, projectOf, resolvedPathsFor, type Config, type HookEnv } from "./context.js";
 export { eventLine, HOOK_VERSION, inputDigest, ulid } from "./events.js";
 export { failReply, failVerdict, type FailCause } from "./failrules.js";

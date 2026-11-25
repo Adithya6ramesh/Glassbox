@@ -38,4 +38,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-      - run: node packages/hook/scripts/timing.mjs --warm 100 --cold 20
+      # The bundle is built only here for now: rolldown's native binary is blocked by
+      # Application Control on the owner's Windows machine (decision pending).
+      - run: pnpm --filter @glassbox-ai/hook run bundle
+      # Three ways to start the same hook, measured back to back on the same runner:
+      # unbundled, unbundled + compile cache (launcher), bundled + compile cache.
+      - run: node packages/hook/scripts/timing.mjs --entry main.js --warm 100 --cold 20
+      - run: node packages/hook/scripts/timing.mjs --entry launch.js --warm 100 --cold 20
+      - run: node packages/hook/scripts/timing.mjs --entry bundle/launch.mjs --warm 100 --cold 20

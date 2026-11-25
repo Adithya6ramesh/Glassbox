@@ -81,6 +81,12 @@ export default tseslint.config(
     },
   },
   {
+    // The launcher enables the compile cache before the hook loads, so it needs one dynamic
+    // import of a fixed path. test/banned-code.test.ts checks it stays exactly that.
+    files: ["packages/hook/src/launch.ts"],
+    rules: { "no-restricted-syntax": "off" },
+  },
+  {
     // Dev-time Node scripts (never part of the engine).
     files: ["packages/*/scripts/**/*.mjs", "scripts/**/*.mjs", "bench/**/*.mjs"],
     languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly", Buffer: "readonly" } },

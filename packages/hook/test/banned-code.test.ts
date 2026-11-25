@@ -1,6 +1,7 @@
 // Lint bans for the hook (no network, no child processes) and for protocol (pure: no I/O).
 // Each case is a red-team attempt to sneak the banned capability in.
 import { ESLint } from "eslint";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -41,6 +42,20 @@ describe("hook source: no network, no child processes (RT-HOOK-21)", () => {
   it("ordinary hook code (fs, path, crypto) is allowed", async () => {
     const code = `import fs from "node:fs";\nimport path from "node:path";\nimport crypto from "node:crypto";\nexport const x = [fs, path, crypto];`;
     expect(await errorsFor(code, HOOK_FILE)).toEqual([]);
+  });
+});
+
+describe("the launcher's one dynamic import (RT-HOOK-24)", () => {
+  const src = readFileSync(fileURLToPath(new URL("../src/launch.ts", import.meta.url)), "utf8");
+
+  it("imports exactly ./main.js, as a fixed string", () => {
+    const imports = [...src.matchAll(/\bimport\s*\(/g)];
+    expect(imports).toHaveLength(1);
+    expect(src).toMatch(/await import\("\.\/main\.js"\);/);
+  });
+
+  it("the exception covers launch.ts only: the same import in another hook file is rejected", async () => {
+    expect((await errorsFor(`await import("./main.js");\nexport {};`, HOOK_FILE)).length).toBeGreaterThan(0);
   });
 });
 
