@@ -41,7 +41,9 @@
 - **Claude Code's own instruction and extension files are agent config too**: `CLAUDE.md` and
   `CLAUDE.local.md` at any level, and anything under `.claude/agents/`, `.claude/commands/` and
   `.claude/skills/` (project and `~/.claude`). In 0.1.1 these were ordinary writes.
-  `.claude/settings*.json` and `.mcp.json` stay denied (self-protection).
+  `.claude/settings*.json` and `.mcp.json` stay denied (self-protection). `.mcp.json` can register
+  MCP servers, which are programs Claude Code starts, so the agent can't add servers: users add
+  MCP servers themselves (`claude mcp add` in their own terminal, or by editing `.mcp.json`).
 - **`claude` with an argument that isn't known statically is unanalyzable** (a locked ask), like
   the other agent CLIs: it could be `--dangerously-skip-permissions`. In 0.1.1 it was a liftable
   nested-agent ask.
