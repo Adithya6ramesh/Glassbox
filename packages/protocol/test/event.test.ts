@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
-import { EventBatch, EventBatchResponse, EventEnvelope, LIMITS } from "../src/index.js";
+import { EventBatch, EventBatchResponse, EventEnvelope, LIMITS, OUTCOME_LABELS, OUTCOMES, SpoolEvent } from "../src/index.js";
 
 let seq = 0;
 const ulid = (n: number) => `01J${String(n).padStart(23, "0")}`;
@@ -131,5 +131,34 @@ describe("EventBatch", () => {
 
   it("parses the server response", () => {
     expect(v.safeParse(EventBatchResponse, { accepted: 2, duplicates: 0, rejected: [] }).success).toBe(true);
+  });
+});
+
+describe("outcome, callId and SpoolEvent", () => {
+  it("records an outcome on tool_post only", () => {
+    expect(ok(envelope({ kind: "tool_post", outcome: "asked-not-run", callId: "toolu_FIXTURE000000000001" }))).toBe(true);
+    expect(ok(envelope({ kind: "tool_pre", outcome: "ran" }))).toBe(false);
+    expect(ok(envelope({ kind: "tool_post", outcome: "maybe" }))).toBe(false);
+  });
+
+  it("has a plain label for every outcome", () => {
+    for (const o of OUTCOMES) expect(OUTCOME_LABELS[o].length).toBeGreaterThan(0);
+    expect(OUTCOME_LABELS["asked-not-run"]).toBe("Asked; not run");
+    expect(OUTCOME_LABELS["blocked-no-one-to-ask"]).toBe("Blocked (no one to ask)");
+  });
+
+  it("RT-PROTO-29: callId takes an id, not text (no paths, spaces or control characters)", () => {
+    for (const callId of ["../../x", "a b", "a\nb", "C:\\x", "x".repeat(129), ""]) {
+      expect(ok(envelope({ kind: "tool_post", callId })), JSON.stringify(callId)).toBe(false);
+    }
+  });
+
+  it("SpoolEvent is the envelope without deviceSeq (the uploader assigns it)", () => {
+    const { deviceSeq: _seq, ...spool } = envelope();
+    void _seq;
+    expect(v.safeParse(SpoolEvent, spool).success).toBe(true);
+    expect(v.safeParse(EventEnvelope, spool).success).toBe(false);
+    const r = v.safeParse(SpoolEvent, { ...spool, deviceSeq: 5 });
+    expect(r.success && "deviceSeq" in r.output).toBe(false);
   });
 });

@@ -1,0 +1,41 @@
+name: hook-timing
+
+# Wall-clock time of one hook process (p50/p95/p99, warm and cold), on Linux and Windows.
+# Reported in the job summary, not gated: shared runners vary. Target: p95 ≤ 150 ms for an
+# allow, warm, including Node start-up.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: CI only reads the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: hook-timing-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  timing:
+    name: hook timing (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      # Same SHA pins as ci.yml.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: node packages/hook/scripts/timing.mjs --warm 100 --cold 20
