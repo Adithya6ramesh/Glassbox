@@ -7,7 +7,7 @@
 // - Huge or pathological inputs still hit the limit (CP-LIMIT-010) and are treated as degraded.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CORPUS } from "../../engine/test/corpus/claude-code-commands.js";
-import { HARD_STOP_MS, runHook } from "../src/index.js";
+import { eventLine, HARD_STOP_MS, runHook, SLOW_CHECK_MS } from "../src/index.js";
 import { bash, makeEnv, post, pre, spooled, toolUseId } from "./helpers.js";
 
 function slowClock(factor: number): void {
@@ -72,27 +72,26 @@ describe("slow machine (simulated)", () => {
     // handful; many would mean the limit is too low for a slow machine.
     const hits = again.filter(({ again: a }) => a.hitLimit);
     expect(hits.length, `normal checks that hit the limit: ${hits.map(label).join("; ")}`).toBeLessThanOrEqual(Math.floor(CORPUS.length / 100));
+    // Every event's slowCheck matches its own recorded time, on both clocks.
+    for (const c of [...normal, ...slow]) expect(c.slow, `engineMs ${c.engineMs}`).toBe(c.engineMs > 100);
     // Not a trivial pass: a large share of checks really were over 100 ms on the slowed clock.
     const slowShare = slow.filter((c) => c.slow).length / slow.length;
     expect(slowShare, `factor ${factor.toFixed(0)}, ${(slowShare * 100).toFixed(0)}% over 100 ms`).toBeGreaterThanOrEqual(0.4);
   }, 120_000); // four passes over 532 commands: slow Windows runners need more than the default
 
-  it("records checks over 100 ms as slowCheck; fast checks are not marked", () => {
-    // Measure this check's real time first (the bundle runs it faster than the source does),
-    // then slow the clock so it reads ~200 ms: over 100, with room under the 750 ms limit.
-    // (Whether a check reaches the limit is RT-HOOK-26's subject, not this test's.)
-    // Same folder throughout: the engine doesn't count one-time setup (it subtracts it), and a
-    // fresh folder can make the first check mostly setup, which would read as ~0 ms.
-    const env = makeEnv();
-    for (let i = 0; i < 3; i++) runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
-    const realMs = Math.max(pct(spooled(env).filter((e) => e.kind === "tool_pre").map((e) => e.timing.engineMs), 0.5), 0.01);
-    slowClock(200 / realMs);
-    runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
-    vi.restoreAllMocks();
-    runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
-    const [slow, fast] = spooled(env).filter((e) => e.kind === "tool_pre").slice(3);
-    expect(slow!.timing.slowCheck, `real ${realMs.toFixed(3)} ms, slowed ${slow!.timing.engineMs.toFixed(0)} ms`).toBe(true);
-    expect(fast!.timing.slowCheck ?? false).toBe(false);
+  // Rewritten 2026-11-26: the earlier version slowed one real check to ~200 ms and expected
+  // slowCheck, but the engine intermittently reports a check's time as ~0 ms on CI (it
+  // subtracts what it counts as one-time setup), so producing one slow check isn't reliable.
+  // The property is tested exactly instead, here and in RT-HOOK-26 (every event, slowed clock).
+  it("records exactly the checks over 100 ms as slowCheck", () => {
+    const base = { sessionId: "00000000-0000-4000-8000-0000000000aa", mode: "balanced" as const, project: { idHash: "a".repeat(64), label: "p" }, degradedReasons: [] };
+    const slowOf = (engineMs: number) => (JSON.parse(eventLine(base, { kind: "session_start", engineMs })!) as { timing: { slowCheck?: boolean } }).timing.slowCheck;
+    expect(SLOW_CHECK_MS).toBe(100);
+    expect(slowOf(100.01)).toBe(true);
+    expect(slowOf(750)).toBe(true);
+    expect(slowOf(100)).toBeUndefined();
+    expect(slowOf(3)).toBeUndefined();
+    expect(slowOf(0)).toBeUndefined();
   });
 
   it("RT-HOOK-27: a pathological command still hits the limit and is denied as degraded high-risk", () => {
