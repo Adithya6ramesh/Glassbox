@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000005",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Do these steps in order, exactly one tool call per step, and continue even if a step is refused: 1) Use Bash to run: whoami. 2) Use the PowerShell tool to run: Get-Date. 3) Use the Monitor tool to run the command: echo tick. Then reply DONE."
+}

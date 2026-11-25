@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000001\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "Do these steps in order, exactly one tool call per step, and continue even if a step fails: 1) Use Write to create notes.txt containing the single word alpha. 2) Use Read on notes.txt. 3) Use Edit to change alpha to beta in notes.txt. 4) Use Glob with pattern *.txt. 5) Use Grep to search for beta. 6) Use Bash to run: echo hello. 7) Use Bash to run: ls does-not-exist-dir. 8) Use the Agent tool with a general-purpose subagent that uses Read on notes.txt and reports its contents. Then reply DONE."
+}

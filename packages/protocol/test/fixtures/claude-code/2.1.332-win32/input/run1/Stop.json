@@ -1,0 +1,24 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000001.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000001\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "Steps 1–7 are done, and step 8 is still running.\n\n1. **Write** created `C:\\project\\notes.txt` containing `alpha`.\n2. **Read** returned `alpha`.\n3. **Edit** changed `alpha` to `beta`.\n4. **Glob** `*.txt` matched `notes.txt`.\n5. **Grep** for `beta` found it in `notes.txt`.\n6. **Bash** `echo hello` printed `hello`.\n7. **Bash** `ls does-not-exist-dir` failed as expected with exit code 2 and \"No such file or directory\".\n8. **Agent** (general-purpose) is reading `notes.txt` in the background. I'll report its contents when it finishes, and I'll reply DONE after that.",
+  "background_tasks": [
+    {
+      "id": "a0000000000000001",
+      "type": "subagent",
+      "status": "running",
+      "description": "Read notes.txt contents",
+      "agent_type": "general-purpose"
+    }
+  ],
+  "session_crons": []
+}

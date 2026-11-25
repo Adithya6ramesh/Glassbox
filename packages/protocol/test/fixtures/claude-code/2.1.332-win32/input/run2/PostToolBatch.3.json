@@ -1,0 +1,27 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000005",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolBatch",
+  "tool_calls": [
+    {
+      "tool_name": "ToolSearch",
+      "tool_input": {
+        "query": "select:Monitor"
+      },
+      "tool_use_id": "toolu_FIXTURE000000000012",
+      "tool_response": [
+        {
+          "type": "tool_reference",
+          "tool_name": "Monitor"
+        }
+      ]
+    }
+  ]
+}

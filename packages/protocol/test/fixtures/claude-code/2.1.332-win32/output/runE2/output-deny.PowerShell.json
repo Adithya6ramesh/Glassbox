@@ -1,0 +1,41 @@
+{
+  "hook_event_name": "output-deny",
+  "tool_name": "PowerShell",
+  "scenario": {
+    "run": "E2",
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "-p",
+    "replyMethod": "exit2",
+    "hookShell": "powershell",
+    "permissionMode": "default",
+    "note": "exit code 2, closest documented no-Git-Bash setup: --disallowedTools Bash + CLAUDE_CODE_USE_POWERSHELL_TOOL=1, hook with \"shell\": \"powershell\""
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000011",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000011.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000011\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000012",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "PowerShell",
+    "tool_input": {
+      "command": "echo glassbox-deny-test",
+      "description": "Hook test step 4: echo deny-test string"
+    },
+    "tool_use_id": "toolu_FIXTURE000000000031"
+  },
+  "hookReply": {
+    "exitCode": 2,
+    "stdout": null,
+    "stderr": "GBX-TEST deny via exit2 (ps-shell)"
+  },
+  "observed": {
+    "toolRan": false,
+    "claudeSaw": "PreToolUse:PowerShell hook error: [node \"C:\\<tmp>\\decide-plugin/decide.cjs\" ps-shell]: GBX-TEST deny via exit2 (ps-shell)\nThis hook comes from the gbx-output-test@inline plugin."
+  }
+}

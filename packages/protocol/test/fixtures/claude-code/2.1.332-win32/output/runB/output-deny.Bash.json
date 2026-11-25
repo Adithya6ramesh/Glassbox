@@ -1,0 +1,41 @@
+{
+  "hook_event_name": "output-deny",
+  "tool_name": "Bash",
+  "scenario": {
+    "run": "B",
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "-p",
+    "replyMethod": "exit2",
+    "hookShell": "git-bash",
+    "permissionMode": "default",
+    "note": "exit code 2 + stderr, default hook shell"
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000003",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000003.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000003\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000004",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo glassbox-deny-test",
+      "description": "Echo glassbox-deny-test"
+    },
+    "tool_use_id": "toolu_FIXTURE000000000007"
+  },
+  "hookReply": {
+    "exitCode": 2,
+    "stdout": null,
+    "stderr": "GBX-TEST deny via exit2 (default-shell)"
+  },
+  "observed": {
+    "toolRan": false,
+    "claudeSaw": "PreToolUse:Bash hook error: [node \"C:\\<tmp>\\decide-plugin/decide.cjs\" default-shell]: GBX-TEST deny via exit2 (default-shell)\nThis hook comes from the gbx-output-test@inline plugin."
+  }
+}

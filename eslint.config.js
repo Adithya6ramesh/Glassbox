@@ -20,15 +20,15 @@ const engineRestrictions = {
   "no-new-func": "error",
   "no-restricted-imports": ["error", {
     paths: BANNED_MODULES.flatMap((m) => [
-      { name: m, message: "Banned in @glassbox-ai/engine: no I/O or host APIs." },
-      { name: `node:${m}`, message: "Banned in @glassbox-ai/engine: no I/O or host APIs." },
+      { name: m, message: "Banned in pure packages (engine, protocol): no I/O or host APIs." },
+      { name: `node:${m}`, message: "Banned in pure packages (engine, protocol): no I/O or host APIs." },
     ]),
   }],
   "no-restricted-globals": ["error",
     ...["process", "require", "Buffer", "fetch", "XMLHttpRequest", "WebSocket",
         "setTimeout", "setInterval", "setImmediate", "queueMicrotask",
         "globalThis", "global", "window", "self"].map((name) => ({
-      name, message: "Host globals are banned in @glassbox-ai/engine.",
+      name, message: "Host globals are banned in pure packages (engine, protocol).",
     })),
   ],
   "no-restricted-syntax": ["error",
@@ -49,7 +49,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.strict,
   {
-    files: ["packages/engine/src/**/*.ts"],
+    files: ["packages/engine/src/**/*.ts", "packages/protocol/src/**/*.ts"],
     // Red team RT-S1: an inline `eslint-disable` comment would switch every
     // rule above off. Inline config is ignored for engine source.
     linterOptions: { noInlineConfig: true },

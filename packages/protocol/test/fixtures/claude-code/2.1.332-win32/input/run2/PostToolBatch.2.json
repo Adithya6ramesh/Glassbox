@@ -1,0 +1,23 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000005",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolBatch",
+  "tool_calls": [
+    {
+      "tool_name": "PowerShell",
+      "tool_input": {
+        "command": "Get-Date",
+        "description": "Print current date and time"
+      },
+      "tool_use_id": "toolu_FIXTURE000000000011",
+      "tool_response": "25 November 2026 15:29:58"
+    }
+  ]
+}

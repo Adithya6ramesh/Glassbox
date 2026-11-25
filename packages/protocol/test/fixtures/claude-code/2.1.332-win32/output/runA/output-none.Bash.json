@@ -1,0 +1,41 @@
+{
+  "hook_event_name": "output-none",
+  "tool_name": "Bash",
+  "scenario": {
+    "run": "A",
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "-p",
+    "replyMethod": "none",
+    "hookShell": "git-bash",
+    "permissionMode": "default",
+    "note": "JSON reply, hook command in the default hook shell"
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000001.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000001\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000002",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo glassbox-normal-test",
+      "description": "Echo glassbox-normal-test"
+    },
+    "tool_use_id": "toolu_FIXTURE000000000003"
+  },
+  "hookReply": {
+    "exitCode": 0,
+    "stdout": null,
+    "stderr": null
+  },
+  "observed": {
+    "toolRan": true,
+    "claudeSaw": "glassbox-normal-test"
+  }
+}
