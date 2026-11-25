@@ -79,13 +79,44 @@ const MaxBytes = (n: number) => v.check((s: string) => utf8(s) <= n, `over ${n} 
 
 const TOOL_KINDS = ["tool_pre", "tool_post"] as const;
 
-const EnvelopeObject = v.object({
+/**
+ * What finally happened to a tool call (on `tool_post` events only).
+ * - ran / failed: the tool ran (PostToolUse / PostToolUseFailure)
+ * - blocked: Glassbox denied it
+ * - blocked-no-one-to-ask: Glassbox asked, but nobody could answer (`-p` mode), so Claude
+ *   Code refused it. Expected behaviour, not an error.
+ * - asked-not-run: Glassbox asked and the call never ran (the user said No, or the turn
+ *   ended without it)
+ * - refused-not-run: Claude Code itself refused it (its own permission rules)
+ * - unknown: no follow-up event arrived and Glassbox hadn't asked or denied
+ */
+export const OUTCOMES = ["ran", "failed", "blocked", "blocked-no-one-to-ask", "asked-not-run", "refused-not-run", "unknown"] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+/** Plain labels for local display (`glassbox tail`). */
+export const OUTCOME_LABELS: Readonly<Record<Outcome, string>> = {
+  ran: "Ran",
+  failed: "Ran; failed",
+  blocked: "Blocked",
+  "blocked-no-one-to-ask": "Blocked (no one to ask)",
+  "asked-not-run": "Asked; not run",
+  "refused-not-run": "Refused by Claude Code; not run",
+  unknown: "Outcome unknown",
+};
+
+/** Claude Code's tool_use_id: pairs a tool_pre event with its tool_post event. */
+export const CallId = v.pipe(v.string(), v.regex(/^[A-Za-z0-9_-]{1,128}$/, "bad call id"));
+
+const baseEntries = {
   v: v.literal(1),
   eventId: EventId,
-  deviceSeq: v.pipe(v.number(), v.safeInteger(), v.minValue(0)),
   ts: Timestamp,
   sessionId: SessionId,
   kind: v.picklist(["session_start", "tool_pre", "tool_post", "session_stop", "session_end", "heartbeat", "degraded", "self_protection"]),
+  callId: v.optional(CallId),
+  outcome: v.optional(v.picklist(OUTCOMES)),
+  /** false when the engine asked for a result rewrite that wasn't applied (output flag off, or no known shape). */
+  resultRewriteApplied: v.optional(v.boolean()),
   tool: v.optional(v.object({ name: Text(256), server: v.optional(Text(128)), builtin: v.boolean() })),
   verdict: v.optional(v.picklist(["allow", "warn", "ask", "deny"])),
   /** What was actually returned to Claude Code (can differ from the verdict). */
@@ -117,16 +148,35 @@ const EnvelopeObject = v.object({
     /** Display label (folder basename), not a path. */
     label: v.pipe(Text(64), v.check((s) => !/[\\/]/.test(s), "label must not be a path")),
   }),
-});
+};
+
+type Base = v.InferOutput<v.ObjectSchema<typeof baseEntries, undefined>>;
+const isToolKind = (e: Base) => (TOOL_KINDS as readonly string[]).includes(e.kind);
+const checkToolHasTool = (e: Base) => !isToolKind(e) || e.tool !== undefined;
+const checkOutcomeOnPost = (e: Base) => e.outcome === undefined || e.kind === "tool_post";
+const checkDegraded = (e: Base) => e.degraded || e.degradedReasons === undefined;
+const checkSize = (e: Base) => utf8(JSON.stringify(e)) <= (e.content === undefined ? LIMITS.eventBytes : LIMITS.eventWithContentBytes);
+
+/**
+ * What the hook writes to the local spool: an envelope without `deviceSeq`. Parallel hook
+ * processes can't hand out a strictly increasing number without a lock on the hot path,
+ * so the single-instance uploader assigns `deviceSeq` when it sends.
+ */
+export const SpoolEvent = v.pipe(
+  v.object(baseEntries),
+  v.check((e) => checkToolHasTool(e), "tool events need `tool`"),
+  v.check((e) => checkOutcomeOnPost(e), "outcome only on tool_post"),
+  v.check((e) => checkDegraded(e), "degradedReasons without degraded"),
+  v.check((e) => checkSize(e), "event too large"),
+);
+export type SpoolEvent = v.InferOutput<typeof SpoolEvent>;
 
 export const EventEnvelope = v.pipe(
-  EnvelopeObject,
-  v.check((e) => !(TOOL_KINDS as readonly string[]).includes(e.kind) || e.tool !== undefined, "tool events need `tool`"),
-  v.check((e) => e.degraded || e.degradedReasons === undefined, "degradedReasons without degraded"),
-  v.check(
-    (e) => utf8(JSON.stringify(e)) <= (e.content === undefined ? LIMITS.eventBytes : LIMITS.eventWithContentBytes),
-    "event too large",
-  ),
+  v.object({ ...baseEntries, deviceSeq: v.pipe(v.number(), v.safeInteger(), v.minValue(0)) }),
+  v.check((e) => checkToolHasTool(e), "tool events need `tool`"),
+  v.check((e) => checkOutcomeOnPost(e), "outcome only on tool_post"),
+  v.check((e) => checkDegraded(e), "degradedReasons without degraded"),
+  v.check((e) => checkSize(e), "event too large"),
 );
 export type EventEnvelope = v.InferOutput<typeof EventEnvelope>;
 
