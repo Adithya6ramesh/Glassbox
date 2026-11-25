@@ -8,6 +8,7 @@ import {
 import { builtinCategory } from "./builtin-tools.js";
 import { analyzePowerShell } from "./powershell.js";
 import { isProtectedWrite } from "./protected-write.js";
+import { agentConfigWrite } from "./agent-clis.js";
 import { analyzeShellCommand } from "./shell/analyze.js";
 import { analyzeSql } from "./sql.js";
 
@@ -21,6 +22,7 @@ export function writePath(path: string, acc: Acc, t: ToolCtx): void {
   if (isProtectedWrite(np, t.pctx)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
   acc.persist(persistenceHit(np, t.pctx), "changes", np.path);
   acc.wrote(np.path);
+  agentConfigWrite(np, t.pctx, acc);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   if (p.includes("/.git/hooks/") || p.endsWith("/.git/config") || p.includes("/.husky/") || p.endsWith("/.envrc") || p.endsWith("/.bashrc") || p.endsWith("/.zshrc") || p.endsWith("/.profile") || p.endsWith("/.bash_profile") || p.endsWith("/.pre-commit-config.yaml") || p.endsWith("profile.ps1") || p.includes("/library/launchagents/") || p.includes("/.config/systemd/user/")) {
     acc.tag("high-risk", "config.agent");

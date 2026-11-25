@@ -15,6 +15,30 @@
   inside the project reached through a junction or symlink that leads outside it asks, and one
   that leads to a sensitive file asks as sensitive (`CP-EXFIL-030`).
 
+**Other agent CLIs**
+- **Starting another coding-agent CLI is a nested agent**, like `claude`: Codex (`codex`), Gemini
+  CLI (`gemini`), Aider (`aider`), Cursor CLI (`agent`, `cursor-agent`), opencode, Goose, Amp,
+  Crush, GitHub Copilot CLI (`copilot`), Kiro CLI (`kiro-cli`, `kiro`), Cline (`cline`) and Qwen
+  Code (`qwen`) are `exec.nested-agent` (a liftable ask). In 0.1.1 most were unknown programs.
+- **Their flags and environment that turn off approvals or the sandbox are denied**
+  (`CP-SELF-003`), as `claude --dangerously-skip-permissions` is: for example
+  `codex --yolo`/`-a never`/`--sandbox danger-full-access`, `gemini --approval-mode yolo`,
+  `aider --yes-always`, `agent --force`/`--sandbox disabled`, `opencode run --auto`,
+  `GOOSE_MODE=auto`, `copilot --allow-all-tools`, `kiro-cli chat --trust-all-tools`,
+  `cline --yolo`, and config-folder overrides (`CODEX_HOME`, `OPENCODE_CONFIG`…). Only flags
+  confirmed in each tool's current documentation are listed. An argument that isn't known
+  statically makes the call unanalyzable.
+- **Package runners are unwrapped for agent CLIs**: `npx @openai/codex --yolo`,
+  `pnpm dlx @google/gemini-cli …`, `bunx opencode-ai …`, and **`npx @anthropic-ai/claude-code
+  --dangerously-skip-permissions`, which 0.1.1 allowed**. `pnpm dlx|exec|x` now passes the flags
+  after the package to the analysis (before, only operands were passed).
+- **Their configuration and instruction files are agent config** (`config.agent`, liftable ask)
+  on every write path: `~/.codex/`, `~/.gemini/`, `~/.cursor/`, `~/.config/opencode|goose|amp|crush/`,
+  `~/.qwen/`, `~/.copilot/`, `~/.kiro/`, `~/.aider.conf.yml`, the system Gemini CLI settings, and
+  in the project `.codex/`, `.gemini/`, `.cursor/`, `.opencode/`, `.amp/`, `.qwen/`,
+  `opencode.json[c]`, `.aider.conf.yml`, `.goosehints`, `.crushrc`, `AGENTS.md`, `GEMINI.md`,
+  `QWEN.md`, `CRUSH.md`.
+
 **Persistence outside the project**
 - **"Allow & remember" can no longer silence persistence outside the project.** A remembered rule
   never lifts the ask for startup files and profiles (`CP-SELF-005`: `~/.bashrc`, `~/.zshrc`,
