@@ -1,0 +1,30 @@
+{
+  "name": "@glassbox-ai/hook",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Glassbox Claude Code hook: checks each tool call with the engine and records what happened. No network.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "glassbox-hook": "./dist/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "timing": "node scripts/timing.mjs"
+  },
+  "dependencies": {
+    "@glassbox-ai/engine": "workspace:*",
+    "@glassbox-ai/protocol": "workspace:*",
+    "valibot": "1.5.0"
+  }
+}

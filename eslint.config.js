@@ -56,6 +56,31 @@ export default tseslint.config(
     rules: engineRestrictions,
   },
   {
+    // The hook runs on every tool call: no network of any kind, and no child processes
+    // (the uploader spawn arrives later as its own reviewed change).
+    files: ["packages/hook/src/**/*.ts"],
+    linterOptions: { noInlineConfig: true },
+    rules: {
+      // The hook strips control characters from reasons and labels, so regexes name them on purpose.
+      "no-control-regex": "off",
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
+      "no-restricted-imports": ["error", {
+        paths: ["net", "http", "https", "http2", "dns", "tls", "dgram", "child_process", "worker_threads", "cluster", "inspector"].flatMap((m) => [
+          { name: m, message: "Banned in @glassbox-ai/hook: no network, no child processes." },
+          { name: `node:${m}`, message: "Banned in @glassbox-ai/hook: no network, no child processes." },
+        ]),
+      }],
+      "no-restricted-globals": ["error",
+        ...["fetch", "XMLHttpRequest", "WebSocket", "EventSource"].map((name) => ({ name, message: "No network in the hook." })),
+      ],
+      "no-restricted-syntax": ["error",
+        { selector: "ImportExpression", message: "Dynamic import() is banned in the hook." },
+      ],
+    },
+  },
+  {
     // Dev-time Node scripts (never part of the engine).
     files: ["packages/*/scripts/**/*.mjs", "scripts/**/*.mjs", "bench/**/*.mjs"],
     languageOptions: { globals: { process: "readonly", console: "readonly", URL: "readonly", Buffer: "readonly" } },
