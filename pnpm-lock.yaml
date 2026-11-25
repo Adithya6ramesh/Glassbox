@@ -206,6 +206,12 @@ importers:
         specifier: 1.5.0
         version: 1.5.0(typescript@6.0.3)
 
+  packages/protocol:
+    dependencies:
+      valibot:
+        specifier: 1.5.0
+        version: 1.5.0(typescript@6.0.3)
+
   packages/rules-baseline: {}
 
   packages/shell-difftest:
