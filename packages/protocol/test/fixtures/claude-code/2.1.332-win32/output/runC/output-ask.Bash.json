@@ -1,0 +1,47 @@
+{
+  "hook_event_name": "output-ask",
+  "tool_name": "Bash",
+  "scenario": {
+    "run": "C",
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "-p",
+    "replyMethod": "json",
+    "hookShell": "powershell",
+    "permissionMode": "default",
+    "note": "JSON reply, hook registered with \"shell\": \"powershell\""
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000005",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000005.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000005\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000006",
+    "permission_mode": "default",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo glassbox-ask-test",
+      "description": "Echo glassbox-ask-test"
+    },
+    "tool_use_id": "toolu_FIXTURE000000000014"
+  },
+  "hookReply": {
+    "exitCode": 0,
+    "stdout": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "GBX-TEST ask via json (ps-shell)"
+      }
+    },
+    "stderr": null
+  },
+  "observed": {
+    "toolRan": false,
+    "claudeSaw": "GBX-TEST ask via json (ps-shell)"
+  }
+}

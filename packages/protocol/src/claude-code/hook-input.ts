@@ -110,7 +110,10 @@ export const PermissionRequestInput = event("PermissionRequest", {
   tool_use_id: v.optional(v.string()),
 });
 
-/** TODO-VERIFY (whole event): did not fire in -p mode refusals in 2.1.332. Fields from the docs. */
+/**
+ * TODO-VERIFY (whole event): in 2.1.332 -p runs it fired neither for permission refusals
+ * nor for hook deny/ask. Fields from the docs.
+ */
 export const PermissionDeniedInput = event("PermissionDenied", {
   tool_name: NonEmpty, // TODO-VERIFY
   tool_input: v.optional(ToolInput), // TODO-VERIFY

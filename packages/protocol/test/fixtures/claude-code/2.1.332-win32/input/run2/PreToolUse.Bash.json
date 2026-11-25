@@ -1,0 +1,18 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000005",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "whoami",
+    "description": "Print current user name"
+  },
+  "tool_use_id": "toolu_FIXTURE000000000010"
+}

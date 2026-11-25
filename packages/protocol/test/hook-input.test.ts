@@ -88,7 +88,7 @@ describe("parseHookInput: red team", () => {
   });
 
   it("RT-PROTO-6: issues never echo input values (tool input can hold secrets)", () => {
-    const secret = "sk-live-THIS-MUST-NOT-BE-LOGGED";
+    const secret = ["sk", "live", "THIS-MUST-NOT-BE-LOGGED"].join("-"); // built at run time
     const r = parseHookInput(pre({ session_id: 12345, tool_use_id: secret.length, tool_name: { secret } }), "PreToolUse");
     expect(r.ok).toBe(false);
     expect(JSON.stringify(r)).not.toContain("THIS-MUST-NOT");

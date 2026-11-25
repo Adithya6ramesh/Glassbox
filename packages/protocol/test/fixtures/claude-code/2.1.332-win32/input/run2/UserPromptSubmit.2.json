@@ -1,0 +1,10 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000004",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000004.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000005",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "<task-notification>\n<task-id>task00001</task-id>\n<tool-use-id>toolu_FIXTURE000000000013</tool-use-id>\n<output-file>C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000004\\tasks\\task00001.output</output-file>\n<status>completed</status>\n<summary>Monitor \"Emit a single tick line\" stream ended</summary>\n<event>tick</event>\n</task-notification>"
+}

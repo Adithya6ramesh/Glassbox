@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000006",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000006.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000006\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000007",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "DONE\n\nBoth steps were refused, so neither file exists:\n1. `mkdir refused-dir` needs approval because it creates a directory inside the working directory.\n2. The Write to `C:\\project\\refused.txt` needs permission before it can run.",
+  "background_tasks": [],
+  "session_crons": []
+}

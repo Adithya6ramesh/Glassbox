@@ -1,0 +1,23 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000006",
+  "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000006.jsonl",
+  "cwd": "C:\\project",
+  "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000006\\scratchpad",
+  "prompt_id": "00000000-0000-4000-8000-000000000007",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolBatch",
+  "tool_calls": [
+    {
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "mkdir refused-dir",
+        "description": "Create refused-dir in the working directory"
+      },
+      "tool_use_id": "toolu_FIXTURE000000000014",
+      "tool_response": "mkdir in 'C:\\project\\refused-dir' needs approval. The path is inside the working directories for this session ('C:\\project'), and Claude Code asks before a shell command creates, changes or removes files there."
+    }
+  ]
+}
