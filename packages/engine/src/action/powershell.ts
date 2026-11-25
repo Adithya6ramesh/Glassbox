@@ -5,7 +5,7 @@ import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceH
 import { isProtectedWrite } from "./protected-write.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { allLoopback, classifyUpload, recordUpload } from "./upload.js";
-import { commandFiles } from "./schedule.js";
+import { commandFiles, isRunKey } from "./schedule.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
 
 class PsUnanalyzable extends Error {
@@ -449,6 +449,10 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     if (pathTargets().some(policyKey)) { acc.protect("CP-SELF-003", "changes Claude Code policy in the registry"); return; }
     acc.tag("high-risk", "config.agent");
     acc.reason("changes the Windows registry");
+    // Run / RunOnce keys start programs at every login (rev 11): a scheduled job (CP-SELF-006).
+    if (pathTargets().some((t) => isRunKey(tokText(t).pathValue ?? ""))) {
+      acc.scheduleJob({ kind: "autostart", verb: cmdlet.startsWith("remove") ? "removes" : "changes", path: null, schedule: "at login (registry Run key)", files: [] });
+    }
     return;
   }
   if (cmdlet === "remove-item" || cmdlet === "clear-content" || cmdlet === "clear-item") {

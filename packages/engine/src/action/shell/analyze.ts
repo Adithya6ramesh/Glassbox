@@ -1,7 +1,7 @@
 // Shell classification over the parsed AST.
 import { Acc } from "../acc.js";
 import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
-import { commandFiles, schtasksJob } from "../schedule.js";
+import { commandFiles, isRunKey, schtasksJob } from "../schedule.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
@@ -476,7 +476,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
     const flat = args.map((a) => (a.value ?? a.word.raw)).join(" ").toLowerCase().replace(/[\\/"']/g, "");
     if (flat.includes("policiesclaudecode")) { acc.protect("CP-SELF-003", "changes Claude Code policy in the registry"); return; }
     const sub = (args[0]?.value ?? "").toLowerCase();
-    if (["add", "delete", "import", "restore", "load", "copy"].includes(sub)) acc.tag("high-risk", "config.agent");
+    if (["add", "delete", "import", "restore", "load", "copy"].includes(sub)) {
+      acc.tag("high-risk", "config.agent");
+      // Run / RunOnce keys start programs at every login (rev 11): a scheduled job (CP-SELF-006).
+      if (isRunKey(flat)) acc.scheduleJob({ kind: "autostart", verb: sub === "delete" ? "removes" : "changes", path: null, schedule: "at login (registry Run key)", files: [] });
+      // import/restore/load take a file whose keys aren't visible: they may write a Run key.
+      if (["import", "restore", "load"].includes(sub)) acc.reason("loads registry keys from a file");
+    }
     return;
   }
 

@@ -6,6 +6,17 @@
 
 export type JobKind = "cron" | "systemd" | "at" | "launchd" | "autostart" | "startup-folder" | "task-scheduler" | "service" | "boot-script";
 
+/**
+ * Windows registry keys that start a program at login (rev 11): ...\CurrentVersion\Run, RunOnce,
+ * RunOnceEx, RunServices[Once], in HKCU/HKLM and the 32-bit view (WOW6432Node), and the Explorer
+ * policy Run key. Compared with separators, quotes and spaces removed, case-insensitively; any
+ * key whose name starts with "Run" right under CurrentVersion counts (conservative: ask).
+ */
+export function isRunKey(text: string): boolean {
+  const s = text.toLowerCase().replace(/[\\/"'\s`]/g, "");
+  return /microsoftwindowscurrentversion(policiesexplorer)?run/.test(s);
+}
+
 export interface ScheduledJob {
   kind: JobKind;
   verb: "creates" | "changes" | "removes";

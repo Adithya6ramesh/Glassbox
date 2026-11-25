@@ -15,6 +15,23 @@
   inside the project reached through a junction or symlink that leads outside it asks, and one
   that leads to a sensitive file asks as sensitive (`CP-EXFIL-030`).
 
+**Persistence outside the project**
+- **"Allow & remember" can no longer silence persistence outside the project.** A remembered rule
+  never lifts the ask for startup files and profiles (`CP-SELF-005`: `~/.bashrc`, `~/.zshrc`,
+  `~/.profile`…, PowerShell profiles) or scheduled jobs and autostart (`CP-SELF-006`: scheduled
+  tasks, the Startup folder, LaunchAgents/LaunchDaemons, systemd user units, XDG autostart,
+  cron). A session grant covering the call (every one of its liftable tags) may lift them. In
+  0.1.1 neither could. New export `GRANT_LIFTABLE_FINDINGS`.
+- Any other high finding in the same call still asks; unanalyzable calls, edits to files an
+  approved job runs (`CP-SELF-007`), remote-access persistence (`CP-SELF-004`) and Claude Code
+  policy keys are unchanged.
+- **Windows Run keys are persistence.** Writes to `…\CurrentVersion\Run`, `RunOnce`, `RunOnceEx`,
+  `RunServices[Once]` (HKCU, HKLM, WOW6432Node) and the Explorer policy Run key, through
+  PowerShell registry cmdlets or `reg add`/`reg delete`, are now a login autostart job
+  (`CP-SELF-006`). In 0.1.1 they were an ordinary registry write a remembered rule could lift.
+- Persistence inside the project (`.husky`, `.git/hooks`, `.envrc`, `.pre-commit-config.yaml`)
+  stays liftable by remembered rules and session grants, as before.
+
 ## 0.1.1 (2026-11-25)
 
 Stricter defaults. Some calls that 0.1.0 allowed now ask or deny.
