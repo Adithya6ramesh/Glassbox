@@ -5,7 +5,7 @@
 //  - other project files → warn (high-risk net.egress, as any network call)
 //  - every destination on this machine (localhost, 127.0.0.0/8, ::1) → not egress at all
 import type { Acc } from "./acc.js";
-import { isProtectedRead, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
+import { isProtectedRead, normalizeFull, normalizePath, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 
 export type UploadKind = "sensitive" | "outside" | "project";
 
@@ -41,18 +41,41 @@ export function allLoopback(destinations: readonly (string | null)[]): boolean {
   return destinations.every((d) => d !== null && (() => { const h = hostOf(d); return h !== null && isLoopbackHost(h); })());
 }
 
-/** Classifies an uploaded file. `projectDir` is the session's project directory. */
-export function classifyUpload(np: NormPath | null, pctx: PathCtx, projectDir: string | null): UploadKind {
+/**
+ * Windows paths whose meaning differs from their lexical form: UNC shares (also \\localhost\C$),
+ * and the \\?\ (literal: ".." is not collapsed) and \\.\ (device) namespaces. An upload from
+ * such a path is never shown to be a project file.
+ */
+const WIN_SPECIAL_PREFIX = /^[\\/]{2}/;
+/** `C:notes.txt` is relative to drive C's own current directory, not to the project. */
+const WIN_DRIVE_RELATIVE = /^[A-Za-z]:(?![\\/])/;
+
+/**
+ * Classifies an uploaded file. `projectDir` is the session's project directory (raw, as the
+ * caller gave it); `raw` is the file argument as written. Since 0.1.2 the project directory is
+ * normalized like the file path (before, on Windows every upload counted as "outside").
+ */
+export function classifyUpload(np: NormPath | null, pctx: PathCtx, projectDir: string | null, raw?: string | null): UploadKind {
   if (np === null || np.path === null) {
     if (np !== null && sensitiveLabel(np, pctx)) return "sensitive";
     return "outside"; // not known statically: it can't be shown to be a project file
   }
   if (isProtectedRead(np, pctx) || sensitiveLabel(np, pctx)) return "sensitive";
+
+  // Where the path really leads, when the caller resolved it (junctions, symlinks).
+  const resolved = pctx.resolved?.[np.path];
+  const real = resolved === undefined ? null : normalizePath(resolved, { ...pctx, cwd: null, resolved: undefined });
+  if (real !== null && real.path !== null && (isProtectedRead(real, pctx) || sensitiveLabel(real, pctx))) return "sensitive";
+
   if (projectDir === null) return "outside";
-  const fold = (s: string) => (pctx.caseInsensitive ? s.toLowerCase() : s);
-  const root = fold(projectDir.endsWith("/") ? projectDir.slice(0, -1) : projectDir);
-  const p = fold(np.path);
-  return p === root || p.startsWith(root + "/") ? "project" : "outside";
+  if (pctx.platform === "win32" && typeof raw === "string" && (WIN_SPECIAL_PREFIX.test(raw.trim()) || WIN_DRIVE_RELATIVE.test(raw.trim()))) return "outside";
+  const rootFull = normalizeFull(projectDir, { ...pctx, cwd: null });
+  if (rootFull === null) return "outside";
+  const root = rootFull.length > 1 && rootFull.endsWith("/") ? rootFull.slice(0, -1) : rootFull;
+  const inside = (p: string) => p === root || p.startsWith(root.endsWith("/") ? root : root + "/");
+  if (!inside(np.path)) return "outside";
+  if (real !== null && (real.path === null || !inside(real.path))) return "outside";
+  return "project";
 }
 
 /** Records one uploaded file (the caller has checked the destination isn't loopback). */

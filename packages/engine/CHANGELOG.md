@@ -1,6 +1,21 @@
 # Changelog: @glassbox-ai/engine
 
-## 0.1.1 (unreleased)
+## 0.1.2 (unreleased)
+
+**Uploads on Windows**
+- **Uploading a file from inside the project no longer asks on Windows.** The project folder was
+  compared in its raw form (backslashes) with the normalized file path, so every Windows upload
+  counted as "from outside the project" (`CP-EXFIL-035`, ask). The project folder is now
+  normalized the same way (drive-letter case and `/` vs `\` no longer matter).
+- These still count as outside the project and ask: UNC paths (also `\\localhost\C$\…`), the
+  `\\?\` and `\\.\` prefixes, drive-relative paths (`C:notes.txt`), 8.3 short names that don't
+  match the project's own spelling, `..` out of the project, and sibling folders whose name starts
+  with the project's (`C:\proj-evil` next to `C:\proj`).
+- A caller-resolved real path (`resolvedPaths`) now counts for uploads on every platform: a file
+  inside the project reached through a junction or symlink that leads outside it asks, and one
+  that leads to a sensitive file asks as sensitive (`CP-EXFIL-030`).
+
+## 0.1.1 (2026-11-25)
 
 Stricter defaults. Some calls that 0.1.0 allowed now ask or deny.
 

@@ -1050,7 +1050,8 @@ function uploadFile(file: WordInfo | string, c: Ctx2, loop: boolean): void {
   if (loop) return;
   const np = typeof file === "string" ? normalizePath(file, c.pctx) : npOf(file, c.pctx);
   const label = typeof file === "string" ? file : (file.pathValue ?? file.suffix ?? "?");
-  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd), label.slice(0, 80));
+  const raw = typeof file === "string" ? file : file.pathValue;
+  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd, raw), label.slice(0, 80));
 }
 
 function network(lower: string, args: WordInfo[], c: Ctx2): void {

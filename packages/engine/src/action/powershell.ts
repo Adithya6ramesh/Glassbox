@@ -537,7 +537,7 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     if (!loop) {
       for (const f of files) {
         const p = f === null ? null : np({ k: "word", v: f, dyn: false } as Tok, pctx);
-        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd), f ?? "a file named at run time");
+        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd, f), f ?? "a file named at run time");
       }
     }
     return;
