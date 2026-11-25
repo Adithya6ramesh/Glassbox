@@ -41,11 +41,20 @@ describe("protected writes via file tools", () => {
   });
 
   it("ordinary project writes are allowed", () => {
-    for (const p of ["/home/u/proj/src/index.ts", "src/a.ts", "/home/u/proj/.claude/agents/x.md", "/home/u/proj/settings.json"]) {
+    for (const p of ["/home/u/proj/src/index.ts", "src/a.ts", "/home/u/proj/settings.json"]) {
       const d = builtin("Write", { file_path: p, content: "x" });
       expect(d.actionRisk.selfProtection, p).toBe(false);
       expect(d.verdict, p).toBe("allow");
     }
+  });
+
+  // Owner decision 2026-11-25 (spec rev 11b, Q-112-1): .claude/agents was an "ordinary write"
+  // above; it is now agent config. Still not self-protection (not denied), but it asks.
+  it(".claude/agents is agent config: not self-protection, but a liftable ask", () => {
+    const d = builtin("Write", { file_path: "/home/u/proj/.claude/agents/x.md", content: "x" });
+    expect(d.actionRisk.selfProtection).toBe(false);
+    expect(d.actionRisk.tags).toContain("config.agent");
+    expect(d.verdict).toBe("ask");
   });
 
   it("caller-resolved realpaths are checked too", () => {

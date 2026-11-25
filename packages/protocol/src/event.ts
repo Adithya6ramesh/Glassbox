@@ -136,6 +136,8 @@ const baseEntries = {
   timing: v.object({
     totalMs: v.pipe(v.number(), v.minValue(0)),
     engineMs: v.pipe(v.number(), v.minValue(0)),
+    /** The engine check took longer than its 100 ms default (the slow_check metric). */
+    slowCheck: v.optional(v.boolean()),
     startupMs: v.optional(v.pipe(v.number(), v.minValue(0))),
   }),
   versions: v.object({ plugin: Text(50), engine: Text(50), ruleset: Text(100) }),

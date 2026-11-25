@@ -9,11 +9,15 @@ import { blockingReasonOf, writeReply, type Reply } from "./reply.js";
 import { runHook } from "./run.js";
 
 const STARTED_AT_MS = performance.now();
-/** Wall clock since process start; well under the 5 s Claude Code timeout in the registration. */
-const DEADLINE_MS = 800;
 const MAX_STDIN = 2 * 1024 * 1024;
 
 const { event, homeDir } = parseArgs(process.argv.slice(2), process.env, os.homedir());
+/**
+ * Wall clock since process start, per event: room for start-up plus the engine's time limit
+ * (750 ms PreToolUse, 1,500 ms otherwise; see HARD_STOP_MS), and well under the 5 s Claude Code
+ * timeout in the registration.
+ */
+const DEADLINE_MS = event === "pre" ? 1200 : 2000;
 const platform = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
 
 let finished = false;

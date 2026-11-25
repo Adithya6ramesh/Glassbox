@@ -6,6 +6,9 @@ import { CallId, SessionId, SpoolEvent, type Outcome } from "@glassbox-ai/protoc
 
 export const HOOK_VERSION = "0.0.0";
 
+/** The engine's default time limit: a check slower than this is recorded as slowCheck. */
+export const SLOW_CHECK_MS = 100;
+
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** ULID: 48-bit millisecond time + 80 random bits, Crockford base32. */
@@ -67,12 +70,14 @@ export interface EventFields {
   findings?: ReturnType<typeof findingsOf> | undefined;
   summary?: Record<string, unknown> | undefined;
   engineMs?: number | undefined;
+  /** The engine's own degradation for this check (hard stop, size limits…). */
+  engineDegradedReasons?: readonly string[] | undefined;
   rulesetVersion?: string | undefined;
 }
 
 /** A validated spool line, or null if it doesn't fit the schema (it is then not written). */
 export function eventLine(base: EventBase, f: EventFields): string | null {
-  const degradedReasons = [...new Set(base.degradedReasons)].slice(0, 20);
+  const degradedReasons = [...new Set([...base.degradedReasons, ...(f.engineDegradedReasons ?? [])])].slice(0, 20);
   const raw: Record<string, unknown> = {
     v: 1,
     eventId: ulid(),
@@ -83,6 +88,7 @@ export function eventLine(base: EventBase, f: EventFields): string | null {
     timing: {
       totalMs: Math.max(0, performance.now()),
       engineMs: Math.max(0, f.engineMs ?? 0),
+      ...((f.engineMs ?? 0) > SLOW_CHECK_MS ? { slowCheck: true } : {}),
       ...(base.startedAtMs !== undefined ? { startupMs: Math.max(0, base.startedAtMs) } : {}),
     },
     versions: { plugin: HOOK_VERSION, engine: ENGINE_VERSION, ruleset: (f.rulesetVersion ?? "baseline").slice(0, 100) || "baseline" },

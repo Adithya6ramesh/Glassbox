@@ -38,6 +38,13 @@
   in the project `.codex/`, `.gemini/`, `.cursor/`, `.opencode/`, `.amp/`, `.qwen/`,
   `opencode.json[c]`, `.aider.conf.yml`, `.goosehints`, `.crushrc`, `AGENTS.md`, `GEMINI.md`,
   `QWEN.md`, `CRUSH.md`.
+- **Claude Code's own instruction and extension files are agent config too**: `CLAUDE.md` and
+  `CLAUDE.local.md` at any level, and anything under `.claude/agents/`, `.claude/commands/` and
+  `.claude/skills/` (project and `~/.claude`). In 0.1.1 these were ordinary writes.
+  `.claude/settings*.json` and `.mcp.json` stay denied (self-protection).
+- **`claude` with an argument that isn't known statically is unanalyzable** (a locked ask), like
+  the other agent CLIs: it could be `--dangerously-skip-permissions`. In 0.1.1 it was a liftable
+  nested-agent ask.
 
 **Persistence outside the project**
 - **"Allow & remember" can no longer silence persistence outside the project.** A remembered rule
