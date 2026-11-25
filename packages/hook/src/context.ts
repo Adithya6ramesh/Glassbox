@@ -115,6 +115,13 @@ export function buildContext(a: {
   projectIdHash: string; remembered: RememberedRule[];
 }): SessionContext {
   const { env } = a;
+  // The working folder in its real long form. On Windows it can arrive as an 8.3 short name
+  // (C:\Users\RUNNER~1\...); the engine can't rule out that a short-name segment hides a
+  // protected folder, so every relative write would be denied. Resolving it also follows
+  // junctions and symlinks, so a project folder that is really a link into ~/.claude is seen
+  // as ~/.claude. The home and Glassbox folders stay as given: writes through their short or
+  // linked spellings are already denied by the engine, and changing them could only unprotect.
+  const cwd = realpathOr(a.cwd);
   const glassboxDirs = [env.glassboxHome, ...(env.pluginRoot ? [env.pluginRoot] : [])];
   return {
     sessionId: a.sessionId,
@@ -124,10 +131,10 @@ export function buildContext(a: {
     projectIdHash: a.projectIdHash,
     remembered: a.remembered,
     homeDir: env.homeDir,
-    cwd: a.cwd,
+    cwd,
     caseInsensitiveFs: caseInsensitive(env.platform),
     glassboxDirs,
-    resolvedPaths: resolvedPathsFor(a.toolInput, a.cwd, env),
+    resolvedPaths: resolvedPathsFor(a.toolInput, cwd, env),
     servers: [],
     signals: a.store.readSignals(a.sessionId),
     policy: { mode: a.config.mode },

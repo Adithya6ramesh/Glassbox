@@ -149,7 +149,7 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
   // Recording must never change the decision above.
   try {
     const appliedAs = appliedAsOf(d.verdict, s.config);
-    const summary = summarize(input.tool_name, input.tool_input, { cwd: input.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs });
+    const summary = summarize(input.tool_name, input.tool_input, { cwd: ctx.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs });
     const actionRisk = { level: d.actionRisk.level, tags: [...d.actionRisk.tags], unanalyzable: d.actionRisk.unanalyzable };
     s.store.appendSignals(input.session_id, d.signals.filter((g) => g.kind !== "scheduled-job"));
     s.store.putPending(input.session_id, {
@@ -212,7 +212,7 @@ function handlePost(input: Extract<HookInput, { hook_event_name: "PostToolUse" }
     }
     const findings = [...rewriteFinding(p, input.tool_input), ...findingsOf(d)];
     spool(s, [postEvent(s, p, input.tool_name, input.tool_use_id, "ran", {
-      ...(p ? {} : { summary: summarize(input.tool_name, input.tool_input, { cwd: input.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs }) }),
+      ...(p ? {} : { summary: summarize(input.tool_name, input.tool_input, { cwd: ctx.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs }) }),
       ...(findings.length ? { findings } : {}),
       ...(resultRewriteApplied !== undefined ? { resultRewriteApplied } : {}),
       engineMs: d.elapsedMs,
