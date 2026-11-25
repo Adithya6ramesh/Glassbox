@@ -1,6 +1,7 @@
 // Lint bans for the hook (no network, no child processes) and for protocol (pure: no I/O).
 // Each case is a red-team attempt to sneak the banned capability in.
 import { ESLint } from "eslint";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -41,6 +42,23 @@ describe("hook source: no network, no child processes (RT-HOOK-21)", () => {
   it("ordinary hook code (fs, path, crypto) is allowed", async () => {
     const code = `import fs from "node:fs";\nimport path from "node:path";\nimport crypto from "node:crypto";\nexport const x = [fs, path, crypto];`;
     expect(await errorsFor(code, HOOK_FILE)).toEqual([]);
+  });
+});
+
+// Was "the launcher's one dynamic import"; the launcher went with the compile cache (2026-11-25),
+// so the rule is now stricter: no dynamic import anywhere in hook source, and no lint exception.
+describe("no dynamic import in hook source (RT-HOOK-24)", () => {
+  const srcDir = fileURLToPath(new URL("../src/", import.meta.url));
+
+  it("no source file contains import(…)", () => {
+    for (const f of readdirSync(srcDir, { recursive: true }).map(String).filter((n) => n.endsWith(".ts"))) {
+      expect(readFileSync(srcDir + f, "utf8"), f).not.toMatch(/\bimport\s*\(/);
+    }
+  });
+
+  it("lint rejects one in any hook file", async () => {
+    expect((await errorsFor(`await import("./main.js");\nexport {};`, HOOK_FILE)).length).toBeGreaterThan(0);
+    expect((await errorsFor(`await import("./main.js");\nexport {};`, "packages/hook/src/launch.ts")).length).toBeGreaterThan(0);
   });
 });
 

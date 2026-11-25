@@ -25,9 +25,11 @@ const opt = (name, dflt) => {
 const WARM = Number(opt("--warm", "100"));
 const COLD = Number(opt("--cold", "20"));
 const JSON_OUT = opt("--json", "");
+// --entry selects the start file under dist/ (main.js = unbundled, bundle/main.mjs = bundled).
+const ENTRY = opt("--entry", "main.js");
 
 const hookDir = fileURLToPath(new URL("..", import.meta.url));
-const MAIN = path.join(hookDir, "dist", "main.js");
+const MAIN = path.join(hookDir, "dist", ENTRY);
 if (!fs.existsSync(MAIN)) {
   console.error("Build first: pnpm run build");
   process.exit(1);
@@ -85,7 +87,7 @@ function copyInstall(dest) {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.cpSync(dir, to, { recursive: true, dereference: true, filter: (s) => s === dir || !SKIP.test(s) });
   }
-  return path.join(dest, "dist", "main.js");
+  return path.join(dest, "dist", ENTRY);
 }
 
 const pct = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];
@@ -120,7 +122,7 @@ for (const name of ["pre-allow", "pre-deny"]) {
 const env = { platform: process.platform, arch: process.arch, node: process.version, cpus: os.cpus().length, cpu: os.cpus()[0]?.model ?? "?" };
 const f = (x) => x.toFixed(1);
 const lines = [
-  `Hook timing (ms, wall clock per hook process, parent-measured) on ${env.platform}/${env.arch}, Node ${env.node}, ${env.cpus}× ${env.cpu}`,
+  `Hook timing via ${ENTRY} (ms, wall clock per hook process, parent-measured) on ${env.platform}/${env.arch}, Node ${env.node}, ${env.cpus}× ${env.cpu}`,
   "",
   "| scenario | n | p50 | p95 | p99 | max |",
   "|---|---|---|---|---|---|",

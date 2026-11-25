@@ -162,18 +162,29 @@ describe("pairing a decision with what happened (by tool_use_id)", () => {
 
 describe("TODO-VERIFY outputs stay off by default", () => {
   it("PostToolUse: no output, and an engine result rewrite is recorded as not applied", () => {
-    const env = makeEnv();
-    // Strict mode hides high-confidence secrets from Claude, so the engine asks for a rewrite.
-    fs.mkdirSync(env.glassboxHome, { recursive: true });
-    fs.writeFileSync(path.join(env.glassboxHome, "config.json"), JSON.stringify({ mode: "strict" }));
-    const id = toolUseId();
     const key = ["AKIA", "IOSFODNN7EXAMPLE"].join(""); // built at run time
-    const input = { file_path: path.join(env.project, "a.txt") };
-    fs.writeFileSync(input.file_path, "x");
-    run(env, "pre", pre(env, "Read", input, id));
-    const r = run(env, "post", post(env, "Read", input, id, { type: "text", file: { filePath: input.file_path, content: `aws_access_key_id = ${key}` } }));
+    const scenario = () => {
+      const env = makeEnv();
+      // Strict mode hides high-confidence secrets from Claude, so the engine asks for a rewrite.
+      fs.mkdirSync(env.glassboxHome, { recursive: true });
+      fs.writeFileSync(path.join(env.glassboxHome, "config.json"), JSON.stringify({ mode: "strict" }));
+      const id = toolUseId();
+      const input = { file_path: path.join(env.project, "a.txt") };
+      fs.writeFileSync(input.file_path, "x");
+      run(env, "pre", pre(env, "Read", input, id));
+      const r = run(env, "post", post(env, "Read", input, id, { type: "text", file: { filePath: input.file_path, content: `aws_access_key_id = ${key}` } }));
+      return { env, r };
+    };
+    // Warm the engine first. A cold first result check under heavy parallel load (the stress job)
+    // can cross the engine's 100 ms hard stop; the result is then degraded and no rewrite is
+    // asked for (seen once on the Windows stress runner, 2026-11-25). This test is about what the
+    // hook does with a rewrite, so it runs on a warm engine and says so if it was degraded anyway.
+    scenario();
+    const { env, r } = scenario();
     expect(r).toEqual({ exitCode: 0, stdout: "", stderr: "" });
-    expect(posts(env)[0]!.resultRewriteApplied).toBe(false);
+    const e = posts(env)[0]!;
+    expect(e.degraded, `engine result check degraded: ${JSON.stringify(e.degradedReasons)}`).toBe(false);
+    expect(e.resultRewriteApplied).toBe(false);
     expect(JSON.stringify(spooled(env))).not.toContain(key);
   });
 });

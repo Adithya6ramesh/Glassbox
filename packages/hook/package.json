@@ -20,11 +20,15 @@
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
-    "timing": "node scripts/timing.mjs"
+    "timing": "node scripts/timing.mjs",
+    "bundle": "rolldown -c rolldown.config.mjs"
   },
   "dependencies": {
     "@glassbox-ai/engine": "workspace:*",
     "@glassbox-ai/protocol": "workspace:*",
     "valibot": "1.5.0"
+  },
+  "devDependencies": {
+    "rolldown": "1.3.2"
   }
 }
