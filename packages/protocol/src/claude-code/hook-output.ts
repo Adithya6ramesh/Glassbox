@@ -22,7 +22,11 @@
 //   reply and exit 2 is only the fallback when JSON can't be produced.
 // - VERIFIED ask in -p mode: the call is refused (nobody can answer the prompt) and Claude
 //   receives exactly the permissionDecisionReason. No PermissionRequest event fires.
-//   TODO-VERIFY: that an interactive session shows the reason in its permission prompt.
+// - VERIFIED ask in an interactive session (also in "auto" permission mode): Claude Code
+//   shows its permission prompt as "Hook PreToolUse:<tool> requires confirmation for this
+//   command:" followed by the reason and "[plugin:<name>]", and fires PermissionRequest.
+//   Answering No interrupts the turn and leaves NO follow-up event: no PostToolUse, no
+//   PostToolUseFailure, no PostToolBatch. A caller that waits for one never gets it.
 // - VERIFIED no decision (exit 0, empty stdout): the call follows the normal flow.
 // - VERIFIED a refused call gets no PostToolUse, PostToolUseFailure or PermissionDenied
 //   event; only its PostToolBatch entry records it, with the text Claude saw.
@@ -45,7 +49,7 @@ export const PreToolUseOutput = v.strictObject({
       hookEventName: v.literal("PreToolUse"), // VERIFIED
       permissionDecision: v.optional(v.picklist(["deny", "ask"])), // VERIFIED (both)
       // VERIFIED: deny → Claude sees it after "PreToolUse:<tool> hook error: ";
-      // ask in -p → Claude sees it verbatim. TODO-VERIFY: ask in the interactive prompt.
+      // ask in -p → Claude sees it verbatim; ask interactive → shown in the prompt.
       permissionDecisionReason: v.optional(Text(2000)),
       additionalContext: v.optional(Text(2000)), // TODO-VERIFY: added to Claude's context
     }),

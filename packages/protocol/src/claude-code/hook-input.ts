@@ -29,7 +29,7 @@ export function isPlainRecord(x: unknown): x is Record<string, unknown> {
 const ToolInput = v.custom<Record<string, unknown>>(isPlainRecord, "tool_input must be a JSON object");
 const NonEmpty = v.pipe(v.string(), v.minLength(1));
 
-/** Permission modes named in the docs. VERIFIED: "default". TODO-VERIFY: the rest. */
+/** Permission modes named in the docs. VERIFIED: "default", "acceptEdits", "auto". TODO-VERIFY: the rest. */
 export const PERMISSION_MODES = ["default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions"] as const;
 /** SessionStart `source`. VERIFIED: "startup". TODO-VERIFY: the rest. */
 export const SESSION_START_SOURCES = ["startup", "resume", "clear", "compact", "fork"] as const;

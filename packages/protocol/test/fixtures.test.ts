@@ -22,10 +22,11 @@ const outputFiles = jsonFiles(path.join(ROOT, "output"));
 
 type OutputFixture = {
   tool_name: string;
-  scenario: { run: string; replyMethod: "json" | "exit2" | "none"; hookShell: string; permissionMode: string };
+  scenario: { run: string; mode: "-p" | "interactive"; replyMethod: "json" | "exit2" | "none"; hookShell: string; permissionMode: string };
   hookStdin: Record<string, unknown>;
   hookReply: { exitCode: number; stdout: { hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string } } | null; stderr: string | null };
-  observed: { toolRan: boolean; claudeSaw: string | null };
+  permissionRequest?: Record<string, unknown>;
+  observed: { toolRan: boolean; claudeSaw: string | null; permissionRequestFired?: boolean; postToolBatchFired?: boolean; promptShown?: string };
 };
 const outputs = outputFiles.map((f) => ({ file: rel(f), decision: path.basename(f).split(".")[0]!.replace("output-", ""), fx: load(f) as unknown as OutputFixture }));
 
@@ -69,7 +70,8 @@ describe("input fixtures (what Claude Code sends)", () => {
 
 describe("output fixtures (what a hook reply does)", () => {
   it("are all present", () => {
-    expect(outputs.length).toBe(39);
+    expect(outputs.length).toBe(41);
+    expect(outputs.filter((o) => o.fx.scenario.mode === "interactive").length).toBe(2);
   });
 
   it("every hook stdin is a PreToolUse payload and every JSON reply fits the Glassbox contract", () => {
@@ -95,8 +97,28 @@ describe("output fixtures (what a hook reply does)", () => {
   });
 
   it("ask in -p mode: Claude sees exactly the reason", () => {
-    for (const { file, fx } of outputs.filter((o) => o.decision === "ask")) {
+    const asks = outputs.filter((o) => o.decision === "ask" && o.fx.scenario.mode === "-p");
+    expect(asks.length).toBeGreaterThan(0);
+    for (const { file, fx } of asks) {
       expect(fx.observed.claudeSaw, file).toBe(fx.hookReply.stdout!.hookSpecificOutput.permissionDecisionReason);
+    }
+  });
+
+  it("ask in an interactive session: Claude Code's prompt shows our reason and fires PermissionRequest", () => {
+    for (const { file, fx } of outputs.filter((o) => o.fx.scenario.mode === "interactive")) {
+      const reason = fx.hookReply.stdout!.hookSpecificOutput.permissionDecisionReason;
+      expect(fx.observed.promptShown, file).toContain(reason);
+      expect(fx.observed.permissionRequestFired, file).toBe(true);
+      expect(parseHookInput(fx.permissionRequest, "PermissionRequest").ok, file).toBe(true);
+      expect(fx.scenario.permissionMode, file).toBe("auto"); // our ask still prompts in auto mode
+    }
+  });
+
+  it("RT-PROTO-28: an interactive No leaves no follow-up event (no PostToolUse, no PostToolBatch)", () => {
+    for (const { file, fx } of outputs.filter((o) => o.fx.scenario.mode === "interactive")) {
+      expect(fx.observed.toolRan, file).toBe(false);
+      expect(fx.observed.postToolBatchFired, file).toBe(false);
+      expect(fx.observed.claudeSaw, file).toBeNull();
     }
   });
 

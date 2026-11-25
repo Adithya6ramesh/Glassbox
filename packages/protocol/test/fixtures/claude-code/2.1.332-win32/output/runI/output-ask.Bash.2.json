@@ -1,0 +1,67 @@
+{
+  "hook_event_name": "output-ask",
+  "tool_name": "Bash",
+  "scenario": {
+    "run": "I",
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "interactive",
+    "replyMethod": "json",
+    "hookShell": "git-bash",
+    "permissionMode": "auto",
+    "note": "Interactive session; Claude Code showed its permission prompt with the hook reason; the owner reported answering No, which interrupted the turn. Neither attempt ran the tool (no PostToolUse)"
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000003",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000003.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000003\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000004",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo glassbox-ask-test",
+      "description": "Print a test string"
+    },
+    "tool_use_id": "toolu_FIXTURE000000000002"
+  },
+  "hookReply": {
+    "exitCode": 0,
+    "stdout": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "ask",
+        "permissionDecisionReason": "GBX-TEST ask via json (default-shell)"
+      }
+    },
+    "stderr": null
+  },
+  "permissionRequest": {
+    "session_id": "00000000-0000-4000-8000-000000000003",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000003.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000003\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000004",
+    "permission_mode": "auto",
+    "effort": {
+      "level": "medium"
+    },
+    "hook_event_name": "PermissionRequest",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "echo glassbox-ask-test",
+      "description": "Print a test string"
+    }
+  },
+  "observed": {
+    "toolRan": false,
+    "claudeSaw": null,
+    "permissionRequestFired": true,
+    "postToolBatchFired": false,
+    "promptShown": "Hook PreToolUse:Bash requires confirmation for this command:\nGBX-TEST ask via json (default-shell) [plugin:gbx-output-test]"
+  }
+}

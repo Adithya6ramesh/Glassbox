@@ -32,9 +32,10 @@ PostToolBatch).
 | runE | JSON | Git Bash | Git removed from PATH; Claude Code still found Git Bash |
 | runE2 | exit 2 + stderr | PowerShell | Only the PowerShell tool (`--disallowedTools Bash`, `CLAUDE_CODE_USE_POWERSHELL_TOOL=1`) |
 | runF | JSON | Git Bash | `acceptEdits` plus allow rules `Bash(echo *)` and `PowerShell(echo *)` |
+| runI | JSON (ask) | Git Bash | **Interactive** session in `auto` mode, run by the owner. The prompt showed the reason; the owner answered No. PermissionRequest fired; no PostToolUse or PostToolBatch followed |
 
 Not covered: a machine with no Git for Windows installed at all (runE2 is the closest
-documented setup), and the permission prompt of an interactive session.
+documented setup).
 
 ## Sanitizing
 
