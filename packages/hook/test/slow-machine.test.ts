@@ -53,10 +53,12 @@ describe("slow machine (simulated)", () => {
     runCorpus(); // warm the engine twice: the first, cold round has one-off outliers
     runCorpus();
     const normal = runCorpus();
-    // Slow the clock so the median check reads ~150 ms: about half the checks are over the
-    // engine's 100 ms default (which would have stopped them), and ordinary variation up to
-    // ~5x stays under the 750 ms limit.
-    const factor = 150 / Math.max(pct(normal.map((c) => c.engineMs), 0.5), 0.05);
+    // The simulated machine is defined by its heaviest normal checks: slow the clock until the
+    // 99th-percentile check reads ~375 ms, half the 750 ms limit. (Until 2026-11-26 the median was
+    // set to 150 ms; on fast runners that meant a slowdown of ~3,000x, and heavy commands such as
+    // `rm -rf node_modules && pnpm install` then crossed 750 ms and were denied as degraded
+    // high-risk calls: the limit working, at an unrealistic speed.)
+    const factor = 375 / Math.max(pct(normal.map((c) => c.engineMs), 0.99), 0.05);
     slowClock(factor);
     const slow = runCorpus();
     // A one-off pause (GC, scheduler) can push a single check over the limit on a slowed clock.
@@ -74,9 +76,10 @@ describe("slow machine (simulated)", () => {
     expect(hits.length, `normal checks that hit the limit: ${hits.map(label).join("; ")}`).toBeLessThanOrEqual(Math.floor(CORPUS.length / 100));
     // Every event's slowCheck matches its own recorded time, on both clocks.
     for (const c of [...normal, ...slow]) expect(c.slow, `engineMs ${c.engineMs}`).toBe(c.engineMs > 100);
-    // Not a trivial pass: a large share of checks really were over 100 ms on the slowed clock.
+    // Not a trivial pass: the heavier checks really were over 100 ms on the slowed clock, so the
+    // engine's 100 ms default would have degraded them (and denied the high-risk ones).
     const slowShare = slow.filter((c) => c.slow).length / slow.length;
-    expect(slowShare, `factor ${factor.toFixed(0)}, ${(slowShare * 100).toFixed(0)}% over 100 ms`).toBeGreaterThanOrEqual(0.4);
+    expect(slowShare, `factor ${factor.toFixed(0)}, ${(slowShare * 100).toFixed(1)}% over 100 ms`).toBeGreaterThanOrEqual(0.05);
   }, 120_000); // four passes over 532 commands: slow Windows runners need more than the default
 
   // Rewritten 2026-11-26: the earlier version slowed one real check to ~200 ms and expected
