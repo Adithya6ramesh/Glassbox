@@ -1,7 +1,7 @@
 // Shell classification over the parsed AST.
 import { Acc } from "../acc.js";
 import { allLoopback, classifyUpload, recordUpload } from "../upload.js";
-import { commandFiles, schtasksJob } from "../schedule.js";
+import { commandFiles, isRunKey, schtasksJob } from "../schedule.js";
 import { trimEndChars } from "../../util/misc.js";
 import { analyzeInlineCode } from "../inline.js";
 import {
@@ -9,6 +9,7 @@ import {
 } from "../paths.js";
 import { analyzeSql } from "../sql.js";
 import { isProtectedWrite } from "../protected-write.js";
+import { agentCliCommand, agentCliFor, agentConfigWrite, agentPackageBin } from "../agent-clis.js";
 import { parseShell, Unanalyzable, type Redirect, type Script, type SimpleCommand, type Word } from "./parse.js";
 
 export interface ShellState {
@@ -258,6 +259,7 @@ function writeTarget(np: NormPath, acc: Acc, pctx: PathCtx, isGlob = false): voi
   if (isProtectedWrite(np, pctx, isGlob)) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
   acc.persist(persistenceHit(np, pctx), "changes", np.path);
   acc.wrote(np.path);
+  agentConfigWrite(np, pctx, acc);
   const p = (np.path ?? np.suffix ?? "").toLowerCase();
   const home = trimEndChars(pctx.homeDir.replace(/\\/g, "/"), "/").toLowerCase();
   const homeFiles = [".bashrc", ".zshrc", ".profile", ".bash_profile", ".bash_login", ".zprofile", ".zshenv", ".zlogin", ".config/fish/config.fish", ".ssh/rc", ".inputrc"];
@@ -472,11 +474,20 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
   // ── Self-protection commands ───────────────────────────────────────────
   if (lower === "glassbox" || lower === "glassbox.exe") { glassboxCli(args, acc); return; }
   if (lower === "claude" || lower === "claude.exe") return claudeCommand(args, c);
+  // Other agent CLIs (rev 11, §7.10): nested agents; approval/sandbox-off flags are denied.
+  const agentCli = agentCliFor(lower);
+  if (agentCli) return agentCliCommand(agentCli, args.map((a) => a.value), envOf(c.cmd), acc);
   if (lower === "reg" || lower === "reg.exe") {
     const flat = args.map((a) => (a.value ?? a.word.raw)).join(" ").toLowerCase().replace(/[\\/"']/g, "");
     if (flat.includes("policiesclaudecode")) { acc.protect("CP-SELF-003", "changes Claude Code policy in the registry"); return; }
     const sub = (args[0]?.value ?? "").toLowerCase();
-    if (["add", "delete", "import", "restore", "load", "copy"].includes(sub)) acc.tag("high-risk", "config.agent");
+    if (["add", "delete", "import", "restore", "load", "copy"].includes(sub)) {
+      acc.tag("high-risk", "config.agent");
+      // Run / RunOnce keys start programs at every login (rev 11): a scheduled job (CP-SELF-006).
+      if (isRunKey(flat)) acc.scheduleJob({ kind: "autostart", verb: sub === "delete" ? "removes" : "changes", path: null, schedule: "at login (registry Run key)", files: [] });
+      // import/restore/load take a file whose keys aren't visible: they may write a Run key.
+      if (["import", "restore", "load"].includes(sub)) acc.reason("loads registry keys from a file");
+    }
     return;
   }
 
@@ -622,6 +633,13 @@ function classify(name0: string, args: WordInfo[], cmd: SimpleCommand, st: Shell
     if (v === null || !looksLikePath(v)) continue;
     if (isProtectedWrite(normalizePath(v, pctx), pctx, a.glob)) { acc.protect("CP-SELF-001", "hands a protected agent or Glassbox file to a program that may change it"); return; }
   }
+}
+
+/** Environment variables set for this command (`VAR=value cmd`), with literal values (null = not literal). */
+function envOf(cmd: SimpleCommand): Map<string, string | null> {
+  const m = new Map<string, string | null>();
+  for (const a of cmd.assigns) m.set(a.name, a.value ? wordInfo(a.value).value : "");
+  return m;
 }
 
 function claudeCommand(args: WordInfo[], c: Ctx2): void {
@@ -779,6 +797,11 @@ function projectTool(rest: WordInfo[], c: Ctx2, unwrapDepth: number): void {
   const n = (() => { const v = h.value as string; const slash = v.lastIndexOf("/"); const at = v.indexOf("@", slash + 1); return (at >= 0 ? v.slice(0, at) : v).split("/").pop() ?? ""; })();
   // A package runner launching the Glassbox CLI (npx glassbox allow …, pnpm dlx @glassbox-ai/…).
   if ((h.value as string).toLowerCase().includes("glassbox")) { glassboxCli(rest.slice(1), c.acc); return; }
+  // A package runner starting an agent CLI (npx @openai/codex --yolo, npx @anthropic-ai/claude-code …).
+  const agentBin = agentPackageBin(h.value as string) ?? (agentCliFor(h.value as string) ? (h.value as string) : undefined);
+  if (agentBin === "claude" || (h.value as string).toLowerCase() === "claude") return claudeCommand(rest.slice(1), c);
+  const agentCli = agentBin !== undefined ? agentCliFor(agentBin) : undefined;
+  if (agentCli) { agentCliCommand(agentCli, rest.slice(1).map((a) => a.value), envOf(c.cmd), c.acc); return; }
   if (PROJECT.has(n) || READ.has(n)) { c.acc.tag("write-reversible", "exec.project-code"); return; }
   if (unwrapDepth < 4 && (n === "rimraf" || n === "del-cli")) { c.acc.tag("high-risk", "fs.delete"); return; }
   c.acc.tag("write-reversible", "exec.project-code");
@@ -1050,7 +1073,8 @@ function uploadFile(file: WordInfo | string, c: Ctx2, loop: boolean): void {
   if (loop) return;
   const np = typeof file === "string" ? normalizePath(file, c.pctx) : npOf(file, c.pctx);
   const label = typeof file === "string" ? file : (file.pathValue ?? file.suffix ?? "?");
-  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd), label.slice(0, 80));
+  const raw = typeof file === "string" ? file : file.pathValue;
+  recordUpload(c.acc, classifyUpload(np, c.pctx, c.st.pctx.cwd, raw), label.slice(0, 80));
 }
 
 function network(lower: string, args: WordInfo[], c: Ctx2): void {
@@ -1399,7 +1423,13 @@ function jsPm(lower: string, args: WordInfo[], c: Ctx2): void {
   if (sub === "" && lower !== "npm") { network(); return; } // bare `pnpm`/`yarn` installs
   if (["ls", "list", "why", "view", "info", "show", "config_get", "root", "bin", "prefix", "help", "-v", "--version", "version_show", "explain", "search", "doctor", "query", "licenses", "store_path"].includes(sub)) return;
   if (sub === "config" && ops[1]?.value === "set") { acc.tag("write-reversible", "fs.write"); return; }
-  if (["dlx", "x", "exec", "create"].includes(sub)) { acc.tags.add("net.fetch.package-manager"); return projectTool(ops.slice(1), c, 0); }
+  if (["dlx", "x", "exec", "create"].includes(sub)) {
+    acc.tags.add("net.fetch.package-manager");
+    // Pass everything after the package, flags included (pnpm dlx @openai/codex --yolo): operands alone drop them.
+    const pkg = ops[1];
+    const at = pkg === undefined ? -1 : args.indexOf(pkg);
+    return projectTool(at >= 0 ? args.slice(at) : ops.slice(1), c, 0);
+  }
   acc.tag("write-reversible", "exec.project-code");
 }
 

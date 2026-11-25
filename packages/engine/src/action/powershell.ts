@@ -3,9 +3,10 @@
 import { Acc } from "./acc.js";
 import { homeTopLevel, isProtected, isProtectedRead, normalizePath, persistenceHit, sensitiveLabel, type NormPath, type PathCtx } from "./paths.js";
 import { isProtectedWrite } from "./protected-write.js";
+import { agentConfigWrite } from "./agent-clis.js";
 import { classifyNative, type WordInfo } from "./shell/analyze.js";
 import { allLoopback, classifyUpload, recordUpload } from "./upload.js";
-import { commandFiles } from "./schedule.js";
+import { commandFiles, isRunKey } from "./schedule.js";
 import { litWord, type SimpleCommand, type Word } from "./shell/parse.js";
 
 class PsUnanalyzable extends Error {
@@ -449,6 +450,10 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     if (pathTargets().some(policyKey)) { acc.protect("CP-SELF-003", "changes Claude Code policy in the registry"); return; }
     acc.tag("high-risk", "config.agent");
     acc.reason("changes the Windows registry");
+    // Run / RunOnce keys start programs at every login (rev 11): a scheduled job (CP-SELF-006).
+    if (pathTargets().some((t) => isRunKey(tokText(t).pathValue ?? ""))) {
+      acc.scheduleJob({ kind: "autostart", verb: cmdlet.startsWith("remove") ? "removes" : "changes", path: null, schedule: "at login (registry Run key)", files: [] });
+    }
     return;
   }
   if (cmdlet === "remove-item" || cmdlet === "clear-content" || cmdlet === "clear-item") {
@@ -514,6 +519,7 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
       if (isProtectedWrite(p, pctx, /[*?[]/.test(p.path ?? ""))) acc.protect("CP-SELF-001", "changes a file that controls the agent or Glassbox");
       acc.persist(persistenceHit(p, pctx), "changes", p.path);
       acc.wrote(p.path);
+      agentConfigWrite(p, pctx, acc);
       const lp = (p.path ?? "").toLowerCase();
       if (lp.endsWith("profile.ps1") || lp.includes("/.git/hooks/")) acc.tag("high-risk", "config.agent");
     }
@@ -537,7 +543,7 @@ function analyzeElement(el: Tok[], st: PsState, acc: Acc, cwd: { cwd: string | n
     if (!loop) {
       for (const f of files) {
         const p = f === null ? null : np({ k: "word", v: f, dyn: false } as Tok, pctx);
-        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd), f ?? "a file named at run time");
+        recordUpload(acc, classifyUpload(p, pctx, st.pctx.cwd, f), f ?? "a file named at run time");
       }
     }
     return;

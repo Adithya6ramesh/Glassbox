@@ -50,6 +50,22 @@ const HARD_FLOOR: ReadonlySet<ActionTag> = new Set(HARD_FLOOR_TAGS);
 
 const str = (x: unknown): x is string => typeof x === "string" && x.length > 0;
 
+/**
+ * Persistence outside the project (rev 11, engine 0.1.2): startup files and profiles
+ * (CP-SELF-005) and scheduled jobs and autostart, including Windows Run keys (CP-SELF-006).
+ * A session grant covering the call may lift these findings; a remembered rule never does, so
+ * "Allow & remember" can't silence them for good. Fixed in the engine, like the hard floor.
+ */
+export const GRANT_LIFTABLE_FINDINGS: readonly string[] = Object.freeze(["CP-SELF-005", "CP-SELF-006"]);
+const GRANT_LIFTABLE: ReadonlySet<string> = new Set(GRANT_LIFTABLE_FINDINGS);
+
+/** A session grant (this session only, never a remembered rule) covering (server, tool, tag). */
+function grantCovers(d: DecideInput, tag: ActionTag): boolean {
+  const own = (m: object, k: string, want: string): boolean => Object.hasOwn(m, k) && (m as Record<string, unknown>)[k] === want;
+  return str(d.sessionId) && d.sessionGrants.some((g) => typeof g === "object" && g !== null &&
+    own(g, "serverId", d.serverId) && own(g, "toolName", d.toolName) && own(g, "actionTag", tag) && own(g, "sessionId", d.sessionId));
+}
+
 /** A remembered rule (this project) or session grant (this session) covering (server, tool, tag). */
 function lifted(d: DecideInput, tag: ActionTag): boolean {
   // Own string properties only: a field inherited through a prototype doesn't count.
@@ -65,6 +81,9 @@ export function decide(d: DecideInput): DecideOutput {
   const mode = d.policy.mode;
   let v: Verdict = "allow";
   const irreversible = new Set(d.ruleset.irreversibleTags);
+
+  // Set in R3: a session grant covers every liftable tag of this call (used for persistence findings below).
+  let grantLiftsPersistence = false;
 
   // R3 (calls only): high-risk action, by mode, then tagOverrides, then remembered rules and
   // session grants (mode-driven asks only, never the hard floor).
@@ -88,12 +107,18 @@ export function decide(d: DecideInput): DecideOutput {
       r3 = vmax(r3, tv);
     }
     if (r3 === "ask" && !floorAsk && liftable.length > 0 && liftable.every((t) => lifted(d, t))) r3 = "allow";
+    grantLiftsPersistence = !floorAsk && liftable.length > 0 && liftable.every((t) => grantCovers(d, t));
     v = vmax(v, r3);
   }
 
-  // R4–R7: findings (confidence ≥ threshold).
+  // R4–R7: findings (confidence ≥ threshold). Persistence outside the project (high, not
+  // critical) is skipped only when a session grant covers the call; every other finding counts.
   let top = -1;
-  for (const f of d.findings) if (f.confidence >= d.minConfidence) top = Math.max(top, SEV.indexOf(f.severity));
+  for (const f of d.findings) {
+    if (f.confidence < d.minConfidence) continue;
+    if (grantLiftsPersistence && f.severity === "high" && GRANT_LIFTABLE.has(f.ruleId)) continue;
+    top = Math.max(top, SEV.indexOf(f.severity));
+  }
   if (top === 2) v = vmax(v, mode === "strict" ? "ask" : "warn");
   if (top === 3) v = vmax(v, "ask");
   if (top === 4) v = vmax(v, "deny"); // R7 🔒
