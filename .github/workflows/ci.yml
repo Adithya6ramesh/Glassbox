@@ -36,3 +36,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
+      # The hook ships as a bundle built in CI (rolldown, dev dependency only). The whole hook
+      # test suite runs again against the built bundle, not only against the source.
+      - run: pnpm --filter @glassbox-ai/hook run bundle
+      - run: pnpm exec vitest run --project "hook (bundle)"
+        env:
+          GLASSBOX_HOOK_TARGET: bundle

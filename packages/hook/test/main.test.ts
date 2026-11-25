@@ -4,10 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { compileCacheDir, parseArgs } from "../src/index.js";
+import { glassboxHomeOf, parseArgs } from "../src/index.js";
 import { bash, makeEnv, pre } from "./helpers.js";
 
-const MAIN = fileURLToPath(new URL("../dist/launch.js", import.meta.url));
+// The hook process under test: dist/main.js, or the bundle when GLASSBOX_HOOK_TARGET=bundle (CI).
+const MAIN = fileURLToPath(new URL(process.env["GLASSBOX_HOOK_TARGET"] === "bundle" ? "../dist/bundle/main.mjs" : "../dist/main.js", import.meta.url));
 
 function runMain(args: string[], stdin: string | null, envVars: Record<string, string> = {}): Promise<{ code: number | null; stdout: string; stderr: string; ms: number }> {
   return new Promise((resolve) => {
@@ -74,26 +75,33 @@ describe("main (real process)", () => {
     expect(parseArgs(["pre", "--home", "/x"], {}, "/home/real").homeDir).toBe("/x");
   });
 
-  it("compile cache: a run creates ~/.glassbox/cache/node-compile, owner-only on POSIX", async () => {
+  // Widened when the compile cache was dropped (2026-11-25): it covered the cache folder only.
+  it("RT-HOOK-25: the agent can't write the hook's own state (config, open decisions, spool, signals)", async () => {
     const env = makeEnv();
-    await runMain(["pre", "--home", env.homeDir], JSON.stringify(pre(env, "Bash", bash("echo hi"))));
-    const dir = compileCacheDir(env.homeDir);
-    expect(fs.existsSync(dir)).toBe(true);
-    expect(fs.readdirSync(dir, { recursive: true }).length).toBeGreaterThan(0);
-    if (process.platform !== "win32") expect(fs.statSync(dir).mode & 0o077).toBe(0);
+    const home = glassboxHomeOf(env.homeDir);
+    const targets = [
+      path.join(home, "config.json"),
+      path.join(home, "sessions", "s", "pending", "toolu_X.json"),
+      path.join(home, "sessions", "s", "signals.jsonl"),
+      path.join(home, "spool", "forged.jsonl"),
+      path.join(home, "device-salt"),
+    ];
+    for (const target of targets) {
+      for (const payload of [
+        pre(env, "Write", { file_path: target, content: "x" }),
+        pre(env, "Bash", bash(`cp /tmp/x '${target}'`)),
+        pre(env, "PowerShell", { command: `Set-Content -Path '${target}' -Value x` }),
+      ]) {
+        const r = await runMain(["pre", "--home", env.homeDir], JSON.stringify(payload));
+        expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, target).toBe("deny");
+      }
+    }
   });
 
-  it("RT-HOOK-25: the agent can't write into the compile cache (code injection path)", async () => {
+  it("no compile cache folder is created (the cache was dropped)", async () => {
     const env = makeEnv();
-    const target = path.join(compileCacheDir(env.homeDir), "evil.bin");
-    for (const payload of [
-      pre(env, "Write", { file_path: target, content: "x" }),
-      pre(env, "Bash", bash(`cp /tmp/x '${target}'`)),
-      pre(env, "PowerShell", { command: `Set-Content -Path '${target}' -Value x` }),
-    ]) {
-      const r = await runMain(["pre", "--home", env.homeDir], JSON.stringify(payload));
-      expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
-    }
+    await runMain(["pre", "--home", env.homeDir], JSON.stringify(pre(env, "Bash", bash("echo hi"))));
+    expect(fs.existsSync(path.join(glassboxHomeOf(env.homeDir), "cache"))).toBe(false);
   });
 
   it("parseArgs: --home needs a value; an event is required", () => {

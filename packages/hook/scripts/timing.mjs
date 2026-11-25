@@ -25,8 +25,8 @@ const opt = (name, dflt) => {
 const WARM = Number(opt("--warm", "100"));
 const COLD = Number(opt("--cold", "20"));
 const JSON_OUT = opt("--json", "");
-// --entry main.js measures without the compile cache (the launcher enables it).
-const ENTRY = opt("--entry", "launch.js");
+// --entry selects the start file under dist/ (main.js = unbundled, bundle/main.mjs = bundled).
+const ENTRY = opt("--entry", "main.js");
 
 const hookDir = fileURLToPath(new URL("..", import.meta.url));
 const MAIN = path.join(hookDir, "dist", ENTRY);

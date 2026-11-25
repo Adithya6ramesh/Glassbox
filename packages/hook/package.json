@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "bin": {
-    "glassbox-hook": "./dist/launch.js"
+    "glassbox-hook": "./dist/main.js"
   },
   "exports": {
     ".": {

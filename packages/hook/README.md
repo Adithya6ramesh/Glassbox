@@ -56,6 +56,15 @@ pattern lengths, rule ids. Finding evidence is not recorded.
 
 ## Timing
 
-`node packages/hook/scripts/timing.mjs` measures p50/p95/p99 per hook process, warm and cold
-(fresh copy of the install). CI runs it on Linux and Windows (`hook-timing` workflow). The
-target is p95 ≤ 150 ms for an allow; the unbundled build does not meet it yet.
+`node packages/hook/scripts/timing.mjs [--entry main.js|bundle/main.mjs]` measures p50/p95/p99
+per hook process, warm and cold (fresh copy of the install). CI runs it on Linux and Windows
+(`hook-timing` workflow). Target: p95 ≤ 150 ms for an allow.
+
+## Bundle
+
+The hook ships as one file, `dist/bundle/main.mjs`, built with rolldown (a dev dependency; it
+never ships). The bundle is built in CI only. CI runs the whole hook test suite against the
+source and again against the bundle (`GLASSBOX_HOOK_TARGET=bundle`). The `hook-release`
+workflow builds and tests the bundle and writes its SHA-256 into the release notes; it publishes
+nothing. Node's compile cache is not used: it made the first run after an install much slower on
+Windows.
