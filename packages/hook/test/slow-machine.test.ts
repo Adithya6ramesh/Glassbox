@@ -21,16 +21,27 @@ const decision = (stdout: string) => (stdout ? (JSON.parse(stdout) as { hookSpec
 
 interface Check { decision: string; engineMs: number; slow: boolean; hitLimit: boolean }
 
-/** One T-CORPUS command through the hook: its decision and what the event recorded. */
-function check(i: number): Check {
+/**
+ * T-CORPUS commands through the hook, all in one folder: each decision plus what its event
+ * recorded, matched by tool_use_id (spool-file order isn't reliable within a millisecond).
+ */
+function runChecks(indexes: readonly number[]): Check[] {
   const env = makeEnv();
-  const c = CORPUS[i]!;
-  const payload = c.tool === "Bash" ? pre(env, "Bash", bash(c.command)) : pre(env, "PowerShell", { command: c.command });
-  const d = decision(runHook("pre", JSON.stringify(payload), env).stdout);
-  const e = spooled(env).find((x) => x.kind === "tool_pre")!;
-  return { decision: d, engineMs: e.timing.engineMs, slow: e.timing.slowCheck === true, hitLimit: (e.degradedReasons ?? []).includes("CP-LIMIT-010") };
+  const runs = indexes.map((i) => {
+    const c = CORPUS[i]!;
+    const id = toolUseId();
+    const payload = c.tool === "Bash" ? pre(env, "Bash", bash(c.command), id) : pre(env, "PowerShell", { command: c.command }, id);
+    return { id, d: decision(runHook("pre", JSON.stringify(payload), env).stdout) };
+  });
+  const byId = new Map(spooled(env).filter((e) => e.kind === "tool_pre").map((e) => [e.callId, e]));
+  return runs.map(({ id, d }) => {
+    const e = byId.get(id)!;
+    return { decision: d, engineMs: e.timing.engineMs, slow: e.timing.slowCheck === true, hitLimit: (e.degradedReasons ?? []).includes("CP-LIMIT-010") };
+  });
 }
-const runCorpus = (): Check[] => CORPUS.map((_, i) => check(i));
+const ALL = CORPUS.map((_, i) => i);
+const runCorpus = (): Check[] => runChecks(ALL);
+const check = (i: number): Check => runChecks([i])[0]!;
 const pct = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.ceil(q * xs.length) - 1)]!;
 
 describe("slow machine (simulated)", () => {
@@ -64,21 +75,22 @@ describe("slow machine (simulated)", () => {
     // Not a trivial pass: a large share of checks really were over 100 ms on the slowed clock.
     const slowShare = slow.filter((c) => c.slow).length / slow.length;
     expect(slowShare, `factor ${factor.toFixed(0)}, ${(slowShare * 100).toFixed(0)}% over 100 ms`).toBeGreaterThanOrEqual(0.4);
-  });
+  }, 120_000); // four passes over 532 commands: slow Windows runners need more than the default
 
   it("records checks over 100 ms as slowCheck; fast checks are not marked", () => {
     // Measure this check's real time first (the bundle runs it faster than the source does),
     // then slow the clock so it reads ~200 ms: over 100, with room under the 750 ms limit.
     // (Whether a check reaches the limit is RT-HOOK-26's subject, not this test's.)
-    const probe = makeEnv();
-    for (let i = 0; i < 3; i++) runHook("pre", JSON.stringify(pre(probe, "Bash", bash("git status"))), probe);
-    const realMs = Math.max(pct(spooled(probe).filter((e) => e.kind === "tool_pre").map((e) => e.timing.engineMs), 0.5), 0.01);
+    // Same folder throughout: the engine doesn't count one-time setup (it subtracts it), and a
+    // fresh folder can make the first check mostly setup, which would read as ~0 ms.
     const env = makeEnv();
+    for (let i = 0; i < 3; i++) runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
+    const realMs = Math.max(pct(spooled(env).filter((e) => e.kind === "tool_pre").map((e) => e.timing.engineMs), 0.5), 0.01);
     slowClock(200 / realMs);
     runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
     vi.restoreAllMocks();
     runHook("pre", JSON.stringify(pre(env, "Bash", bash("git status"))), env);
-    const [slow, fast] = spooled(env).filter((e) => e.kind === "tool_pre");
+    const [slow, fast] = spooled(env).filter((e) => e.kind === "tool_pre").slice(3);
     expect(slow!.timing.slowCheck, `real ${realMs.toFixed(3)} ms, slowed ${slow!.timing.engineMs.toFixed(0)} ms`).toBe(true);
     expect(fast!.timing.slowCheck ?? false).toBe(false);
   });
