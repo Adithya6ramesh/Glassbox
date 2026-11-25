@@ -8,7 +8,7 @@ import { defineConfig } from "rolldown";
 const builtins = new Set([...builtinModules, ...builtinModules.map((m) => `node:${m}`)]);
 
 export default defineConfig({
-  input: { launch: "dist/launch.js" },
+  input: { launch: "dist/launch.js", main: "dist/main.js" },
   platform: "node",
   external: (id) => builtins.has(id),
   output: {

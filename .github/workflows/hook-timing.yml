@@ -46,3 +46,5 @@ jobs:
       - run: node packages/hook/scripts/timing.mjs --entry main.js --warm 100 --cold 20
       - run: node packages/hook/scripts/timing.mjs --entry launch.js --warm 100 --cold 20
       - run: node packages/hook/scripts/timing.mjs --entry bundle/launch.mjs --warm 100 --cold 20
+      # Bundled without the compile cache (decides whether the cache stays).
+      - run: node packages/hook/scripts/timing.mjs --entry bundle/main.mjs --warm 100 --cold 20
