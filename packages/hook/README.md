@@ -50,9 +50,20 @@ result rewrite is recorded as not applied.
 ## Local state (`~/.glassbox`)
 
 `config.json`, `remembered.json` (both written by the CLI), `device-salt`,
-`sessions/<id>/signals.jsonl`, `sessions/<id>/pending/<call>.json`, `spool/*.jsonl`. Events are
-metadata only: command name and flags (never argument values), project-relative paths, hosts,
-pattern lengths, rule ids. Finding evidence is not recorded.
+`sessions/<id>/signals.jsonl`, `sessions/<id>/pending/<call>.json`, `spool/*.jsonl`,
+`spool/dropped.json`, `logs/hook.log` (+ `hook.log.1`). Events are metadata only: command name
+and flags (never argument values), project-relative paths, hosts, pattern lengths, rule ids.
+Finding evidence is not recorded.
+
+- A state file that is a link or belongs to another user is ignored (defaults apply) and the
+  event is marked degraded. On Linux and macOS, group- or world-writable state is fixed to
+  owner-only; the hook never refuses to run. On Windows, ACLs are checked by `glassbox doctor`.
+- The spool holds at most 5,000 event files; past that, events are dropped and counted in
+  `spool/dropped.json`. Decisions are never affected.
+- `logs/hook.log` has one line per call (event, ids, verdicts, outcomes, rule ids, timings,
+  degraded reasons; never content) and rotates at 1 MiB, keeping one old file.
+- Session folders untouched for 30 days are removed at SessionStart.
+- Any failure (bad input, the deadline, an internal error) records a `degraded` event.
 
 ## Timing
 

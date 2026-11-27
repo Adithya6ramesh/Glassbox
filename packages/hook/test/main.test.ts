@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { glassboxHomeOf, parseArgs } from "../src/index.js";
-import { bash, makeEnv, pre } from "./helpers.js";
+import { bash, makeEnv, pre, spooled } from "./helpers.js";
 
 // The hook process under test: dist/main.js, or the bundle when GLASSBOX_HOOK_TARGET=bundle (CI).
 const MAIN = fileURLToPath(new URL(process.env["GLASSBOX_HOOK_TARGET"] === "bundle" ? "../dist/bundle/main.mjs" : "../dist/main.js", import.meta.url));
@@ -50,6 +50,11 @@ describe("main (real process)", () => {
     expect(r.code).toBe(0);
     expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe("deny");
     expect(r.ms).toBeLessThan(3000);
+    // The failure leaves a trace: a degraded event and a log line.
+    const degraded = spooled(env).find((e) => e.kind === "degraded");
+    expect(degraded?.degradedReasons).toContain("hook-timeout");
+    expect(degraded?.appliedAs).toBe("deny");
+    expect(fs.readFileSync(path.join(glassboxHomeOf(env.homeDir), "logs", "hook.log"), "utf8")).toContain("hook-timeout");
   });
 
   it("RT-HOOK-18: stdin over the 2 MiB cap fails closed without reading it all", async () => {
