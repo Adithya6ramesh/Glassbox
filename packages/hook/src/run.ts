@@ -5,8 +5,9 @@ import { checkToolCall, checkToolResult, parseClaudeCodeToolName, redact, type D
 import { exitCodeFromFailure, isPlainRecord, matchesKnownResponseShape, parseHookInput, PostToolUseOutput, type HookInput, type KnownHookEvent, type Outcome } from "@glassbox-ai/protocol";
 import { buildContext, loadConfig, loadRemembered, projectOf, type Config, type HookEnv } from "./context.js";
 import { eventCallId, eventLine, findingsOf, inputDigest, toolInfo, type EventBase } from "./events.js";
-import { failReply, type FailCause } from "./failrules.js";
-import { blockingReasonOf, EMPTY_REPLY, preReply, type Reply } from "./reply.js";
+import { failReply, isReadOnlyTool, type FailCause } from "./failrules.js";
+import { blockingReasonOf, configChangeBlockReply, EMPTY_REPLY, preReply, type Reply } from "./reply.js";
+import { checkSettings, onConfigChange, SETTINGS_UNVERIFIED_REASON, type SettingsRecord } from "./settings-guard.js";
 import crypto from "node:crypto";
 import { Store, type PendingDecision } from "./store.js";
 import { summarize } from "./summary.js";
@@ -24,6 +25,7 @@ export const EVENT_ARGS = {
   "subagent-stop": "SubagentStop",
   "session-start": "SessionStart",
   "session-end": "SessionEnd",
+  "config-change": "ConfigChange",
 } as const satisfies Record<string, KnownHookEvent>;
 export type HookEventArg = keyof typeof EVENT_ARGS;
 
@@ -184,7 +186,13 @@ function handle(arg: HookEventArg, input: HookInput, env: HookEnv): Reply {
       const pruned = s.store.pruneSessions(Date.now());
       if (pruned > 0) note({ pruned });
       spool(s, [eventLine(s.base, { kind: "session_start" })]);
+      s.store.setSessionRoot(input.session_id, input.cwd);
+      // Settings written while no session ran fire no ConfigChange: judge them now.
+      const r = checkSettings(env, { sessionId: input.session_id, projectRoot: input.cwd, via: "session-start" });
+      settingsEvents(s, r.records, r.degraded);
+      if (r.strict) note({ settingsStrict: true });
     });
+    case "ConfigChange": return handleConfigChange(input, env);
     case "PermissionRequest": return record(() => {
       const s = openSession(input, env);
       note({ claudeCodeAsked: s.store.markClaudeCodeAsked(input.session_id, input.tool_name, inputDigest(input.tool_input), input.agent_id ?? null) });
@@ -210,6 +218,29 @@ function spool(s: Session, lines: (string | null)[]): void {
   if (r !== "written") note({ spool: r });
 }
 
+/** settings_change events (key names only) and a log note (counts only, no names). */
+function settingsEvents(s: Session, records: readonly SettingsRecord[], degraded: readonly string[] = []): void {
+  if (records.length === 0 && degraded.length === 0) return;
+  const base = degraded.length > 0 ? { ...s.base, degradedReasons: [...s.base.degradedReasons, ...degraded] } : s.base;
+  note({ settingsChanges: records.length, ...(degraded.length > 0 ? { degraded: base.degradedReasons } : {}) });
+  spool(s, records.map((r) => eventLine(base, { kind: "settings_change", summary: { settings: r } })));
+}
+
+function handleConfigChange(input: Extract<HookInput, { hook_event_name: "ConfigChange" }>, env: HookEnv): Reply {
+  const s = openSession(input, env);
+  const r = onConfigChange(env, {
+    sessionId: input.session_id, cwd: input.cwd, projectRoot: s.store.sessionRoot(input.session_id) ?? input.cwd,
+    source: input.source, ...(input.file_path !== undefined ? { filePath: input.file_path } : {}),
+  });
+  try {
+    settingsEvents(s, r.records);
+    if (r.block) note({ settingsBlocked: true });
+  } catch {
+    // The reply stands; the event is lost.
+  }
+  return r.block ? configChangeBlockReply(r.block) : EMPTY_REPLY;
+}
+
 function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>, env: HookEnv): Reply {
   const s = openSession(input, env);
   const ctx = buildContext({
@@ -217,13 +248,32 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
     projectIdHash: s.base.project.idHash, remembered: s.remembered.rules, hardStopMs: HARD_STOP_MS.pre,
   });
   const d = checkToolCall(toolCall(input.tool_name, input.tool_input, input.agent_type), ctx);
-  const reason = reasonFor(d);
+
+  // Settings changed in a way that needs the user's review: every non-read tool asks (strict
+  // mode) until the user confirms in a terminal. It only ever turns allow/warn into ask; a
+  // check that fails counts as unverified settings (fail closed).
+  let settingsStrict: string | null;
+  let settingsRecords: SettingsRecord[] = [];
+  let settingsDegraded: string[] = [];
+  try {
+    const r = checkSettings(env, { sessionId: input.session_id, projectRoot: s.store.sessionRoot(input.session_id) ?? input.cwd, via: "tool-call" });
+    settingsStrict = r.strict?.reason ?? null;
+    settingsRecords = r.records;
+    settingsDegraded = r.degraded;
+  } catch {
+    settingsStrict = SETTINGS_UNVERIFIED_REASON;
+  }
+  const strictApplies = settingsStrict !== null && !isReadOnlyTool(input.tool_name) && (d.verdict === "allow" || d.verdict === "warn");
+  const verdict = strictApplies ? "ask" : d.verdict;
+  const reason = strictApplies && settingsStrict !== null ? settingsStrict : reasonFor(d);
   const alert = d.protectionDegraded ? "Glassbox: partially protected (rule cache rejected). Run glassbox doctor." : undefined;
-  const reply = preReply({ verdict: d.verdict, reason, ...(alert ? { alert } : {}) }, s.config.flags);
+  const reply = preReply({ verdict, reason, ...(alert ? { alert } : {}) }, s.config.flags);
 
   // Recording must never change the decision above.
   try {
-    const appliedAs = appliedAsOf(d.verdict, s.config);
+    settingsEvents(s, settingsRecords, settingsDegraded);
+    if (strictApplies) note({ settingsStrict: true });
+    const appliedAs = appliedAsOf(verdict, s.config);
     const summary = summarize(input.tool_name, input.tool_input, { cwd: ctx.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs });
     const actionRisk = { level: d.actionRisk.level, tags: [...d.actionRisk.tags], unanalyzable: d.actionRisk.unanalyzable };
     s.store.appendSignals(input.session_id, d.signals.filter((g) => g.kind !== "scheduled-job"));
@@ -233,13 +283,14 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
       deferredSignals: d.signals.filter((g) => g.kind === "scheduled-job"), createdAt: new Date(Date.now()).toISOString(),
     });
     const degradedReasons = [...s.base.degradedReasons, ...(d.degraded ? d.degradedReasons : [])];
+    const findings = [...findingsOf(d), ...(strictApplies ? [{ ruleId: "CP-SET-001", category: "settings", severity: "high" as const, location: "/settings" }] : [])];
     note({
-      callId: eventCallId(input.tool_use_id), verdict: d.verdict, appliedAs, ruleIds: d.findings.map((f) => f.ruleId).slice(0, 20),
+      callId: eventCallId(input.tool_use_id), verdict: d.verdict, appliedAs, ruleIds: findings.map((f) => f.ruleId).slice(0, 20),
       engineMs: Math.round(d.elapsedMs * 10) / 10, ...(degradedReasons.length > 0 ? { degraded: degradedReasons } : {}),
     });
     spool(s, [eventLine({ ...s.base, degradedReasons }, {
       kind: "tool_pre", callId: eventCallId(input.tool_use_id), tool: toolInfo(input.tool_name), verdict: d.verdict, appliedAs,
-      actionRisk, findings: findingsOf(d), summary, engineMs: d.elapsedMs, rulesetVersion: d.rulesetVersion,
+      actionRisk, findings, summary, engineMs: d.elapsedMs, rulesetVersion: d.rulesetVersion,
     })]);
   } catch {
     // The reply stands; the event is lost.

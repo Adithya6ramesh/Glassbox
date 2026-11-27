@@ -6,7 +6,7 @@
 // too, so the stderr reason is reduced to plain words (no paths, no secrets).
 import * as v from "valibot";
 import { redact, type Verdict } from "@glassbox-ai/engine";
-import { PreToolUseOutput } from "@glassbox-ai/protocol";
+import { ConfigChangeOutput, PreToolUseOutput } from "@glassbox-ai/protocol";
 
 export interface Reply {
   exitCode: 0 | 2;
@@ -51,6 +51,15 @@ export function preReply(d: { verdict: Verdict; reason: string; alert?: string }
     return d.verdict === "deny" || d.verdict === "ask" ? exit2Fallback(d.reason) : EMPTY_REPLY;
   }
   return { exitCode: 0, stdout: JSON.stringify(out), stderr: "" };
+}
+
+/**
+ * ConfigChange: block the settings change (verified with 2.1.332: the session keeps its previous
+ * settings; nothing is shown). Exit 2 is the fallback, as for PreToolUse.
+ */
+export function configChangeBlockReply(reason: string): Reply {
+  const out = { decision: "block", reason: clip(nonEmpty(reason, "Blocked by Glassbox."), 2000) };
+  return v.is(ConfigChangeOutput, out) ? { exitCode: 0, stdout: JSON.stringify(out), stderr: "" } : exit2Fallback(reason);
 }
 
 /** Exit 2 blocks the call; stderr becomes the reason Claude sees. */
@@ -116,12 +125,13 @@ export function writeReply(reply: Reply, io: ReplyIO, blockingReason: string): n
   return reply.exitCode;
 }
 
-/** The reason inside a blocking JSON reply (deny or ask), or "" when the reply doesn't block. */
+/** The reason inside a blocking JSON reply (deny, ask, or a ConfigChange block), or "" when the reply doesn't block. */
 export function blockingReasonOf(reply: Reply): string {
   if (reply.exitCode === 2) return reply.stderr || "Blocked by Glassbox.";
   if (!reply.stdout) return "";
   try {
-    const o = JSON.parse(reply.stdout) as { hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+    const o = JSON.parse(reply.stdout) as { decision?: string; reason?: string; hookSpecificOutput?: { permissionDecision?: string; permissionDecisionReason?: string } };
+    if (o.decision === "block" && o.hookSpecificOutput === undefined) return o.reason ?? "Blocked by Glassbox.";
     const h = o.hookSpecificOutput;
     return h && (h.permissionDecision === "deny" || h.permissionDecision === "ask") ? (h.permissionDecisionReason ?? "Blocked by Glassbox.") : "";
   } catch {

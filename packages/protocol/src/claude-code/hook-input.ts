@@ -144,10 +144,17 @@ export const SessionEndInput = event("SessionEnd", {
   reason: v.string(), // VERIFIED ("other"); see SESSION_END_REASONS
 });
 
-/** TODO-VERIFY (whole event): not captured yet. */
+/** ConfigChange `source` values named in the docs. VERIFIED: "local_settings". TODO-VERIFY: the rest. */
+export const CONFIG_CHANGE_SOURCES = ["user_settings", "project_settings", "local_settings", "policy_settings", "skills"] as const;
+
+/**
+ * VERIFIED (2.1.332, interactive): fires for a settings file rewritten outside Claude Code while
+ * a session runs, once per write. Carries the source and the file's path, never its content.
+ * Does NOT fire for files written while no session runs (they are loaded at the next start).
+ */
 export const ConfigChangeInput = event("ConfigChange", {
-  source: v.string(), // TODO-VERIFY: user_settings | project_settings | local_settings | policy_settings | skills
-  file_path: v.optional(v.string()), // TODO-VERIFY
+  source: v.string(), // VERIFIED ("local_settings"); compare against CONFIG_CHANGE_SOURCES
+  file_path: v.optional(v.string()), // VERIFIED for local_settings. TODO-VERIFY: present for every source
 });
 
 /** TODO-VERIFY (whole event): registered in the capture but did not fire. */

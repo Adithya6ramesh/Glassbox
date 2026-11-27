@@ -1,0 +1,32 @@
+{
+  "hook_event_name": "ConfigChange",
+  "scenario": {
+    "claudeCode": "2.1.332",
+    "platform": "win32",
+    "mode": "interactive",
+    "fileValue": "GBX_BLOCK_TEST",
+    "how": "written alone",
+    "hookReply": "block (JSON)"
+  },
+  "hookStdin": {
+    "session_id": "00000000-0000-4000-8000-000000000001",
+    "transcript_path": "C:\\Users\\<user>\\.claude\\projects\\C--project\\00000000-0000-4000-8000-000000000001.jsonl",
+    "cwd": "C:\\project",
+    "scratchpad_dir": "C:\\Users\\<user>\\AppData\\Local\\Temp\\claude\\<hash>\\00000000-0000-4000-8000-000000000001\\scratchpad",
+    "prompt_id": "00000000-0000-4000-8000-000000000002",
+    "hook_event_name": "ConfigChange",
+    "source": "local_settings",
+    "file_path": "C:\\project\\.claude\\settings.local.json"
+  },
+  "hookReply": {
+    "exitCode": 0,
+    "stdout": {
+      "decision": "block",
+      "reason": "GBX-TEST blocked this settings change"
+    }
+  },
+  "observed": {
+    "sessionUsedAfterwards": "previous value",
+    "note": "from the next echo of the variable in the session"
+  }
+}

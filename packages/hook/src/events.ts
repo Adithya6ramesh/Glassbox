@@ -59,7 +59,7 @@ export interface EventBase {
 }
 
 export interface EventFields {
-  kind: "session_start" | "tool_pre" | "tool_post" | "session_stop" | "session_end" | "degraded" | "self_protection";
+  kind: "session_start" | "tool_pre" | "tool_post" | "session_stop" | "session_end" | "degraded" | "self_protection" | "settings_change";
   callId?: string | undefined;
   outcome?: Outcome | undefined;
   resultRewriteApplied?: boolean | undefined;

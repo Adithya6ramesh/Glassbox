@@ -18,6 +18,11 @@ export interface HookEnv {
   pluginRoot?: string | undefined;
   /** CLAUDE_CONFIG_DIR: protected as well; the engine always protects ~/.claude too. */
   claudeConfigDir?: string | undefined;
+  /**
+   * Managed-settings files to watch. Default: Claude Code's documented location for the platform.
+   * Never taken from the environment (a repository's settings can set environment variables).
+   */
+  managedSettingsPaths?: string[] | undefined;
   /** performance.now() when the hook process started its own code. */
   startedAtMs?: number | undefined;
 }

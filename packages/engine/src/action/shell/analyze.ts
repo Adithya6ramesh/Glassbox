@@ -782,14 +782,21 @@ function protectedText(text: string, pctx: PathCtx): boolean {
 }
 
 /**
- * The Glassbox CLI: subcommands that change protection are self-protection (the agent may
- * never run them, however it launches the CLI). A non-literal argument counts as changing.
+ * The Glassbox CLI: the agent may run only its read-only subcommands, however it launches the
+ * CLI. Everything else is self-protection, including subcommands added later (confirm-settings,
+ * restore-settings, …): an allow-list, so a new subcommand is protected without being listed.
+ * With no subcommand, only --version / --help are read-only. A non-literal argument counts as
+ * changing protection.
  */
-const GLASSBOX_MUTATING = new Set(["mode", "allow", "uninstall", "logout", "login", "install", "pair", "unpair", "config", "set", "disable", "enable", "reset", "deny", "forget", "revoke"]);
+const GLASSBOX_READ_ONLY = new Set(["status", "tail", "doctor", "version", "help"]);
+const GLASSBOX_INFO_FLAGS = new Set(["--version", "-v", "-V", "--help", "-h"]);
 function glassboxCli(args: WordInfo[], acc: Acc): void {
+  if (args.some((a) => a.value === null)) { acc.protect("CP-SELF-003", "changes Glassbox protection settings"); return; }
   const sub = (operands(args)[0]?.value ?? "").toLowerCase();
-  const mutating = GLASSBOX_MUTATING.has(sub) || (sub === "doctor" && hasFlag(args, "--fix"));
-  if (mutating || args.some((a) => a.value === null)) acc.protect("CP-SELF-003", "changes Glassbox protection settings");
+  const readOnly = sub === ""
+    ? args.every((a) => GLASSBOX_INFO_FLAGS.has(a.value as string))
+    : GLASSBOX_READ_ONLY.has(sub) && !(sub === "doctor" && hasFlag(args, "--fix"));
+  if (!readOnly) acc.protect("CP-SELF-003", "changes Glassbox protection settings");
 }
 
 function projectTool(rest: WordInfo[], c: Ctx2, unwrapDepth: number): void {

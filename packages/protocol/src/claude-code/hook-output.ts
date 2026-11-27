@@ -74,5 +74,17 @@ export const PostToolUseOutput = v.pipe(
   v.check((o) => o.decision === undefined || o.reason !== undefined, "decision \"block\" needs a reason"),
 );
 
+/**
+ * ConfigChange: VERIFIED (2.1.332, interactive) `{"decision":"block","reason":…}` with exit 0
+ * blocks the change: the session keeps its previous settings. Nothing is shown to the user or to
+ * Claude, and the file on disk is not reverted. Changes to policy settings can't be blocked.
+ */
+export const ConfigChangeOutput = v.strictObject({
+  ...universal,
+  decision: v.literal("block"),
+  reason: Text(2000),
+});
+
 export type PreToolUseOutput = v.InferOutput<typeof PreToolUseOutput>;
+export type ConfigChangeOutput = v.InferOutput<typeof ConfigChangeOutput>;
 export type PostToolUseOutput = v.InferOutput<typeof PostToolUseOutput>;

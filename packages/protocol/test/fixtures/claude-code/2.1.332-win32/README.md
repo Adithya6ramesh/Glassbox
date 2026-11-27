@@ -37,6 +37,24 @@ PostToolBatch).
 Not covered: a machine with no Git for Windows installed at all (runE2 is the closest
 documented setup).
 
+## `configchange/`: ConfigChange (interactive, run by the owner)
+
+One interactive session with a one-session test plugin whose ConfigChange hook recorded its
+stdin and blocked only a settings file containing a test marker (`{"decision":"block",
+"reason":…}`, exit 0). While the session ran, the owner rewrote the project's
+`.claude/settings.local.json` from a separate PowerShell window five times, setting an `env`
+value that a Bash `echo` then printed.
+
+- ConfigChange fired for every external write (5 writes, 5 events), about a second later.
+- The payload names the source and the file, never its content.
+- The block reply worked: where a command ran afterwards, the session still used the previous
+  value. No message was shown to the user.
+- The blocked content stayed in the file on disk.
+- Settings written while no session was running fired no event and were loaded when the
+  next session started.
+
+`observed.sessionUsedAfterwards` is `null` where no command ran before the next change.
+
 ## Sanitizing
 
 Before these files were added: the user name, machine name, real paths and the per-project
