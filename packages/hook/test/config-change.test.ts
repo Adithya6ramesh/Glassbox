@@ -10,8 +10,18 @@ import { confirmSettings, onConfigChange, runHook, type HookEnv } from "../src/i
 import { bash, common, makeEnv, pre, SESSION, spooled } from "./helpers.js";
 
 type Env = HookEnv & { root: string; project: string };
-/** No managed-settings paths: tests never read the machine's real managed settings. */
-const envOf = (): Env => makeEnv({ managedSettingsPaths: [] });
+/**
+ * No managed-settings paths: tests never read the machine's real managed settings. Paths in their
+ * long form, as Claude Code sends them: CI runners' temp folder is an 8.3 short name
+ * (C:\Users\RUNNER~1\...), and the engine rightly denies writes through an unexpanded short name
+ * (RT-HOOK-23 covers that case).
+ */
+const envOf = (): Env => {
+  const e = makeEnv({ managedSettingsPaths: [] });
+  const root = fs.realpathSync.native(e.root);
+  const homeDir = path.join(root, "home");
+  return { ...e, root, homeDir, project: path.join(homeDir, "proj"), glassboxHome: path.join(homeDir, ".glassbox") };
+};
 const userFile = (env: Env) => path.join(env.homeDir, ".claude", "settings.json");
 const projectFile = (env: Env) => path.join(env.project, ".claude", "settings.json");
 const localFile = (env: Env) => path.join(env.project, ".claude", "settings.local.json");
