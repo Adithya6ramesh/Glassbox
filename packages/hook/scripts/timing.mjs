@@ -27,9 +27,12 @@ const COLD = Number(opt("--cold", "20"));
 const JSON_OUT = opt("--json", "");
 // --entry selects the start file under dist/ (main.js = unbundled, bundle/main.mjs = bundled).
 const ENTRY = opt("--entry", "main.js");
+// --file <path> times a standalone bundle (e.g. one downloaded from the hook-release workflow);
+// cold runs copy just that file to a fresh folder.
+const FILE = opt("--file", "");
 
 const hookDir = fileURLToPath(new URL("..", import.meta.url));
-const MAIN = path.join(hookDir, "dist", ENTRY);
+const MAIN = FILE ? path.resolve(FILE) : path.join(hookDir, "dist", ENTRY);
 if (!fs.existsSync(MAIN)) {
   console.error("Build first: pnpm run build");
   process.exit(1);
@@ -54,7 +57,8 @@ function timeOnce(argv, input) {
   const t0 = process.hrtime.bigint();
   const r = spawnSync(process.execPath, argv, { input, encoding: "utf8", windowsHide: true });
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-  if (r.status !== 0) throw new Error(`exit ${r.status}: ${r.stderr}`);
+  const hint = FILE ? " (--file must be a self-contained bundle such as dist/bundle/main.mjs)" : "";
+  if (r.status !== 0) throw new Error(`exit ${r.status}${hint}: ${r.stderr}`);
   return { ms, stdout: r.stdout };
 }
 
@@ -70,6 +74,11 @@ function pkgDir(name, from) {
 // Only what an installed package ships: no sources, tests, corpus or nested node_modules.
 const SKIP = /[\\/](src|test|bench|scripts|node_modules)$/;
 function copyInstall(dest) {
+  if (FILE) {
+    const to = path.join(dest, path.basename(MAIN));
+    fs.copyFileSync(MAIN, to);
+    return to;
+  }
   fs.cpSync(path.join(hookDir, "dist"), path.join(dest, "dist"), { recursive: true, dereference: true });
   fs.copyFileSync(path.join(hookDir, "package.json"), path.join(dest, "package.json"));
   const nm = path.join(dest, "node_modules");
@@ -110,7 +119,7 @@ for (const name of Object.keys(payloads)) {
   results[`warm ${name}`] = stats(Array.from({ length: WARM }, () => timeOnce([MAIN, EVENT[name], "--home", home], JSON.stringify(payloads[name]())).ms));
 }
 // Cold: a fresh copy of the install for every sample.
-for (const name of ["pre-allow", "pre-deny"]) {
+for (const name of COLD > 0 ? ["pre-allow", "pre-deny"] : []) {
   const samples = [];
   for (let i = 0; i < COLD; i++) {
     const main = copyInstall(fs.mkdtempSync(path.join(work, "install-")));
@@ -122,7 +131,7 @@ for (const name of ["pre-allow", "pre-deny"]) {
 const env = { platform: process.platform, arch: process.arch, node: process.version, cpus: os.cpus().length, cpu: os.cpus()[0]?.model ?? "?" };
 const f = (x) => x.toFixed(1);
 const lines = [
-  `Hook timing via ${ENTRY} (ms, wall clock per hook process, parent-measured) on ${env.platform}/${env.arch}, Node ${env.node}, ${env.cpus}× ${env.cpu}`,
+  `Hook timing via ${FILE ? path.basename(MAIN) + " (standalone)" : ENTRY} (ms, wall clock per hook process, parent-measured) on ${env.platform}/${env.arch}, Node ${env.node}, ${env.cpus}× ${env.cpu}`,
   "",
   "| scenario | n | p50 | p95 | p99 | max |",
   "|---|---|---|---|---|---|",

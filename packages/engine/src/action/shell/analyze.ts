@@ -658,7 +658,8 @@ function claudeCommand(args: WordInfo[], c: Ctx2): void {
   if (vals[0] === "mcp" && ["add", "remove", "add-json", "add-from-claude-desktop", "reset-project-choices"].includes(vals[1] ?? "")) { acc.protect("CP-SELF-003", "changes the agent's MCP servers"); return; }
   if (vals[0] === "config" && ["set", "add", "remove"].includes(vals[1] ?? "")) { acc.protect("CP-SELF-003", "changes agent configuration"); return; }
   if (args.length === 1 && ["--version", "-v", "--help", "-h"].includes(vals[0] ?? "")) return;
-  if (vals.some((v) => v === null)) { acc.tag("high-risk", "exec.nested-agent"); acc.reason("starts a nested agent"); return; }
+  // An argument that isn't known statically could be --dangerously-skip-permissions (rev 11).
+  if (vals.some((v) => v === null)) { acc.unanalyzable("claude with arguments that aren't known statically"); return; }
   acc.tag("high-risk", "exec.nested-agent");
   acc.reason("starts a nested agent");
 }

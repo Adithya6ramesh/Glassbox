@@ -113,6 +113,8 @@ export function resolvedPathsFor(input: Record<string, unknown>, cwd: string, en
 export function buildContext(a: {
   sessionId: string; cwd: string; toolInput: Record<string, unknown>; env: HookEnv; store: Store; config: Config;
   projectIdHash: string; remembered: RememberedRule[];
+  /** The engine's time limit for this check (the engine's own default is 100 ms). */
+  hardStopMs: number;
 }): SessionContext {
   const { env } = a;
   // The working folder in its real long form. On Windows it can arrive as an 8.3 short name
@@ -140,5 +142,6 @@ export function buildContext(a: {
     policy: { mode: a.config.mode },
     // Steps 2-3: no rules cache is ever written; the embedded baseline is always used.
     ruleset: EMBEDDED_BASELINE,
+    limits: { hardStopMs: a.hardStopMs },
   };
 }

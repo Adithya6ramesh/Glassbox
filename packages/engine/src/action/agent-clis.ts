@@ -144,6 +144,8 @@ const USER_DIRS = [".codex", ".gemini", ".cursor", ".config/opencode", ".config/
 const USER_FILES = [".aider.conf.yml"];
 const SYSTEM_DIRS = ["/etc/gemini-cli", "/library/application support/geminicli", "c:/programdata/gemini-cli", "c:/programdata/opencode", "c:/programdata/ampcode"];
 const PROJECT_DIRS = [".codex", ".gemini", ".cursor", ".opencode", ".amp", ".qwen"];
+const CLAUDE_FILES = ["claude.md", "claude.local.md"];
+const CLAUDE_DIRS = ["/.claude/agents/", "/.claude/commands/", "/.claude/skills/"];
 const PROJECT_FILES = ["opencode.json", "opencode.jsonc", ".aider.conf.yml", ".goosehints", ".crushrc", "crushrc", "agents.md", "gemini.md", "qwen.md", "crush.md"];
 
 /**
@@ -152,6 +154,10 @@ const PROJECT_FILES = ["opencode.json", "opencode.jsonc", ".aider.conf.yml", ".g
  */
 export function isAgentConfigPath(p: string, home: string, project: string | null): boolean {
   const under = (dir: string) => p === dir || p.startsWith(dir + "/");
+  // Claude Code's own instruction and extension files, at any level (owner decision 2026-11-25).
+  // Its settings files and .mcp.json are self-protected (deny) elsewhere, not here.
+  const base = p.slice(p.lastIndexOf("/") + 1);
+  if (CLAUDE_FILES.includes(base) || CLAUDE_DIRS.some((d) => p.includes(d))) return true;
   if (USER_DIRS.some((d) => under(`${home}/${d}`)) || USER_FILES.some((f) => p === `${home}/${f}`)) return true;
   if (SYSTEM_DIRS.some((d) => under(d))) return true;
   if (project !== null && under(project)) {

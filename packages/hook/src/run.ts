@@ -32,6 +32,13 @@ export function isEventArg(x: unknown): x is HookEventArg {
 
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1, info: 0 } as const;
 
+/**
+ * The engine's time limit per check (owner decision 2026-11-25). The engine's own default (100 ms)
+ * is for other callers; a hook process is always cold, and a slow or busy machine must not turn
+ * normal calls into degraded ones. Huge or pathological inputs still hit these limits.
+ */
+export const HARD_STOP_MS = Object.freeze({ pre: 750, post: 1500 });
+
 /** The reason Claude (deny) or the user (ask) reads. Secrets in it are masked. */
 export function reasonFor(d: Decision): string {
   const top = [...d.findings].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])[0];
@@ -139,7 +146,7 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
   const s = openSession(input, env);
   const ctx = buildContext({
     sessionId: input.session_id, cwd: input.cwd, toolInput: input.tool_input, env, store: s.store, config: s.config,
-    projectIdHash: s.base.project.idHash, remembered: s.remembered.rules,
+    projectIdHash: s.base.project.idHash, remembered: s.remembered.rules, hardStopMs: HARD_STOP_MS.pre,
   });
   const d = checkToolCall(toolCall(input.tool_name, input.tool_input, input.agent_type), ctx);
   const reason = reasonFor(d);
@@ -170,12 +177,14 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
 
 function postEvent(s: Session, p: PendingDecision | null, toolName: string, callId: string, outcome: Outcome, extra: {
   summary?: Record<string, unknown>; findings?: ReturnType<typeof findingsOf>; resultRewriteApplied?: boolean; engineMs?: number;
+  engineDegradedReasons?: readonly string[];
 } = {}): string | null {
   return eventLine(s.base, {
     kind: "tool_post", callId: eventCallId(callId), outcome, tool: toolInfo(toolName),
     verdict: p?.verdict, appliedAs: p?.appliedAs, actionRisk: p?.actionRisk,
     summary: { ...(p?.summary ?? {}), ...(extra.summary ?? {}) },
     findings: extra.findings, resultRewriteApplied: extra.resultRewriteApplied, engineMs: extra.engineMs,
+    engineDegradedReasons: extra.engineDegradedReasons,
   });
 }
 
@@ -192,7 +201,7 @@ function handlePost(input: Extract<HookInput, { hook_event_name: "PostToolUse" }
     const p = s.store.takePending(input.session_id, input.tool_use_id);
     const ctx = buildContext({
       sessionId: input.session_id, cwd: input.cwd, toolInput: input.tool_input, env, store: s.store, config: s.config,
-      projectIdHash: s.base.project.idHash, remembered: s.remembered.rules,
+      projectIdHash: s.base.project.idHash, remembered: s.remembered.rules, hardStopMs: HARD_STOP_MS.post,
     });
     const call = toolCall(input.tool_name, input.tool_input, input.agent_type);
     const d = checkToolResult({ call, result: input.tool_response }, ctx);
@@ -216,6 +225,7 @@ function handlePost(input: Extract<HookInput, { hook_event_name: "PostToolUse" }
       ...(findings.length ? { findings } : {}),
       ...(resultRewriteApplied !== undefined ? { resultRewriteApplied } : {}),
       engineMs: d.elapsedMs,
+      ...(d.degraded ? { engineDegradedReasons: d.degradedReasons } : {}),
     })]);
   } catch {
     return reply;
