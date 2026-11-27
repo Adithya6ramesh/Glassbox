@@ -1,6 +1,22 @@
 # Changelog: @glassbox-ai/engine
 
-## 0.1.2 (unreleased)
+## 0.1.3 (unreleased)
+
+**The Glassbox CLI: only read-only subcommands are allowed to the agent**
+- The agent may run `glassbox status`, `glassbox tail`, `glassbox doctor` (without `--fix`),
+  `glassbox version` and `glassbox help`, and a bare `glassbox` with only `--version`, `-v`,
+  `-V`, `--help` or `-h`. **Every other subcommand is self-protection (`CP-SELF-003`, deny in
+  every mode)**, including `confirm-settings` and `restore-settings` (which end the hook's strict
+  mode after a dangerous Claude Code settings change, or write a settings file back) and any
+  subcommand added later. In 0.1.2 this was a list of known protection-changing subcommands, so
+  each new one had to be added by hand.
+- Matched without regard to case; a flag before the subcommand doesn't hide it
+  (`glassbox --home /x confirm-settings`); a non-literal argument counts as changing protection.
+  Applies however the CLI is launched: directly, `.exe`, package runners (`npx`, `pnpm dlx`,
+  `bunx`…), an interpreter running its script, PowerShell, pipelines and `bash -c`.
+- No benchmark corpus command runs the Glassbox CLI; the detection gate is unchanged.
+
+## 0.1.2 (2026-11-27)
 
 **Uploads on Windows**
 - **Uploading a file from inside the project no longer asks on Windows.** The project folder was

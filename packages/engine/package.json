@@ -1,6 +1,6 @@
 {
   "name": "@glassbox-ai/engine",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Glassbox security engine: pure, deterministic analysis of MCP metadata and agent tool calls.",
   "keywords": [
     "mcp",
