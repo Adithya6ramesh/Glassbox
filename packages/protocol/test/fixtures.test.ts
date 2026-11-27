@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as v from "valibot";
 import { describe, expect, it } from "vitest";
-import { exitCodeFromFailure, matchesKnownResponseShape, parseHookInput, PreToolUseOutput, TOOL_RESPONSE_SHAPES, type KnownHookEvent } from "../src/index.js";
+import { ConfigChangeOutput, exitCodeFromFailure, matchesKnownResponseShape, parseHookInput, PreToolUseOutput, TOOL_RESPONSE_SHAPES, type KnownHookEvent } from "../src/index.js";
 
 const ROOT = fileURLToPath(new URL("./fixtures/claude-code/2.1.332-win32/", import.meta.url));
 
@@ -19,6 +19,7 @@ const rel = (f: string) => path.relative(ROOT, f).replaceAll("\\", "/");
 
 const inputFiles = jsonFiles(path.join(ROOT, "input"));
 const outputFiles = jsonFiles(path.join(ROOT, "output"));
+const configChangeFiles = jsonFiles(path.join(ROOT, "configchange"));
 
 type OutputFixture = {
   tool_name: string;
@@ -163,7 +164,7 @@ describe("fixture hygiene", () => {
   ];
 
   it("RT-PROTO-27: no fixture contains identifying data or secrets", () => {
-    for (const f of [...inputFiles, ...outputFiles]) {
+    for (const f of [...inputFiles, ...outputFiles, ...configChangeFiles]) {
       const text = fs.readFileSync(f, "utf8");
       for (const [name, re] of checks) expect(re.test(text), `${name} in ${rel(f)}`).toBe(false);
     }
@@ -181,5 +182,33 @@ describe("fixture hygiene", () => {
       "private key": ["-----BEGIN", "OPENSSH", "PRIVATE", "KEY-----"].join(" "),
     };
     for (const [name, re] of checks) expect(re.test(samples[name]!), name).toBe(true);
+  });
+});
+
+describe("ConfigChange fixtures (interactive, owner-run, 2026-11-27)", () => {
+  const fx = configChangeFiles.map((f) => ({ file: rel(f), j: load(f) as { hookStdin: unknown; hookReply: { exitCode: number; stdout: unknown }; observed: { sessionUsedAfterwards: string | null } } }));
+
+  it("are all present", () => {
+    expect(fx.length).toBe(5);
+  });
+
+  it("every payload parses as ConfigChange, with source and file_path and no file content", () => {
+    for (const { file, j } of fx) {
+      const r = parseHookInput(j.hookStdin, "ConfigChange");
+      expect(r.ok && r.known, file).toBe(true);
+      if (r.ok && r.known && r.input.hook_event_name === "ConfigChange") {
+        expect(r.input.source, file).toBe("local_settings");
+        expect(r.input.file_path, file).toMatch(/settings\.local\.json$/);
+      }
+      expect(Object.keys(j.hookStdin as object).sort(), file).toEqual(["cwd", "file_path", "hook_event_name", "prompt_id", "scratchpad_dir", "session_id", "source", "transcript_path"]);
+    }
+  });
+
+  it("the block reply that worked live matches ConfigChangeOutput", () => {
+    const blocks = fx.filter(({ j }) => j.hookReply.stdout !== null);
+    expect(blocks.length).toBe(3);
+    for (const { file, j } of blocks) expect(v.is(ConfigChangeOutput, j.hookReply.stdout), file).toBe(true);
+    // Where a command ran afterwards, the session kept its previous value.
+    expect(blocks.filter(({ j }) => j.observed.sessionUsedAfterwards !== null).every(({ j }) => j.observed.sessionUsedAfterwards === "previous value")).toBe(true);
   });
 });

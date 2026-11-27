@@ -5,6 +5,8 @@
 //   device-salt                    random salt for project id hashes
 //   sessions/<sid>/signals.jsonl   engine session signals, append-only
 //   sessions/<sid>/pending/<id>    one open decision per tool call, closed by a later event
+//   sessions/<sid>/root.json       the folder the session started in (project settings)
+//   settings/…                     settings snapshots and strict mode (settings-guard.ts)
 //   spool/<ts>-<pid>-<rand>.jsonl  events for the uploader, written whole then renamed
 //   spool/dropped.json             how many events were dropped because the spool was full
 //   logs/hook.log (+ hook.log.1)   one line per hook call: ids, verdicts, rule ids, timings; no content
@@ -313,6 +315,24 @@ export class Store {
       // no log yet
     }
     fs.appendFileSync(file, JSON.stringify(entry) + "\n", { mode: 0o600 });
+  }
+
+  /** The folder the session started in: Claude Code loads project settings from there. */
+  setSessionRoot(sessionId: string, cwd: string): void {
+    const dir = this.sessionDir(sessionId);
+    this.ensureDir(dir);
+    fs.writeFileSync(path.join(dir, "root.json"), JSON.stringify({ cwd }), { mode: 0o600 });
+  }
+
+  sessionRoot(sessionId: string): string | null {
+    const text = this.readSmall(path.join(this.sessionDir(sessionId), "root.json"));
+    if (text === null) return null;
+    try {
+      const v: unknown = JSON.parse(text);
+      return isPlainRecord(v) && typeof v["cwd"] === "string" && v["cwd"].length > 0 && v["cwd"].length <= 4096 ? v["cwd"] : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

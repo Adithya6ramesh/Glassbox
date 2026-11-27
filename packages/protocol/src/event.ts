@@ -47,8 +47,32 @@ export const SummaryPath = v.pipe(
   v.check((p) => !/[\u0000-\u001f]/.test(p), "control character"),
 );
 
+/** A settings key path as reported by the hook: names only, never values. */
+const SettingsKey = v.pipe(Text(128), v.regex(/^[A-Za-z0-9_$@.*:/()-]+$/, "not a plain key name"));
+
+/**
+ * A change to a Claude Code settings file (`settings_change` events). Key names only.
+ * - level: cosmetic / ordinary (recorded, user warned) or dangerous (strict mode until the user
+ *   confirms); "unchanged" when only formatting changed
+ * - action: allowed; blocked (ConfigChange block); strict (strict mode started); reverted
+ *   (the file is back to its approved content)
+ * - via: which check saw it (ConfigChange, SessionStart, or the check before a tool call)
+ */
+export const SettingsChange = v.object({
+  scope: v.picklist(["user", "project", "local", "managed", "skills", "unknown"]),
+  level: v.picklist(["unchanged", "cosmetic", "ordinary", "dangerous"]),
+  action: v.picklist(["allowed", "blocked", "strict", "reverted"]),
+  via: v.picklist(["config-change", "session-start", "tool-call"]),
+  changedKeys: v.pipe(v.array(SettingsKey), v.maxLength(50)),
+  reasons: v.pipe(v.array(v.pipe(Text(32), v.regex(/^[a-z-]+$/))), v.maxLength(20)),
+  firstSeen: v.optional(v.boolean()),
+  blockedEarlier: v.optional(v.boolean()),
+});
+
 /** Template inputs. Every field is already redacted by the hook. */
 export const SummaryFields = v.object({
+  /** settings_change events only. */
+  settings: v.optional(SettingsChange),
   /** Shell: command name + subcommand + flags only, never argument values. */
   cmd: v.optional(Text(200)),
   /** Shell exit code, when the payload has one (only failed commands carry one). */
@@ -112,7 +136,7 @@ const baseEntries = {
   eventId: EventId,
   ts: Timestamp,
   sessionId: SessionId,
-  kind: v.picklist(["session_start", "tool_pre", "tool_post", "session_stop", "session_end", "heartbeat", "degraded", "self_protection"]),
+  kind: v.picklist(["session_start", "tool_pre", "tool_post", "session_stop", "session_end", "heartbeat", "degraded", "self_protection", "settings_change"]),
   callId: v.optional(CallId),
   outcome: v.optional(v.picklist(OUTCOMES)),
   /** false when the engine asked for a result rewrite that wasn't applied (output flag off, or no known shape). */
