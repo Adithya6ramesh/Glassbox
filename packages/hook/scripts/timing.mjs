@@ -16,6 +16,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evaluateGate } from "./timing-gate.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, dflt) => {
@@ -30,6 +31,8 @@ const ENTRY = opt("--entry", "main.js");
 // --file <path> times a standalone bundle (e.g. one downloaded from the hook-release workflow);
 // cold runs copy just that file to a fresh folder.
 const FILE = opt("--file", "");
+// --gate <baseline.json> fails the run when start-up regressed (see timing-gate.mjs).
+const GATE = opt("--gate", "");
 
 const hookDir = fileURLToPath(new URL("..", import.meta.url));
 const MAIN = FILE ? path.resolve(FILE) : path.join(hookDir, "dist", ENTRY);
@@ -112,12 +115,16 @@ if (allow.stdout !== "" || !deny.stdout.includes("\"deny\"")) throw new Error("s
 
 const results = {};
 // Warm.
-for (let i = 0; i < 5; i++) timeOnce(["-e", ""], "");
-results["warm node-empty"] = stats(Array.from({ length: WARM }, () => timeOnce(["-e", ""], "").ms));
-for (const name of Object.keys(payloads)) {
+const warmNode = () => {
+  for (let i = 0; i < 5; i++) timeOnce(["-e", ""], "");
+  return stats(Array.from({ length: WARM }, () => timeOnce(["-e", ""], "").ms));
+};
+const warmHook = (name) => {
   for (let i = 0; i < 5; i++) timeOnce([MAIN, EVENT[name], "--home", home], JSON.stringify(payloads[name]()));
-  results[`warm ${name}`] = stats(Array.from({ length: WARM }, () => timeOnce([MAIN, EVENT[name], "--home", home], JSON.stringify(payloads[name]())).ms));
-}
+  return stats(Array.from({ length: WARM }, () => timeOnce([MAIN, EVENT[name], "--home", home], JSON.stringify(payloads[name]())).ms));
+};
+results["warm node-empty"] = warmNode();
+for (const name of Object.keys(payloads)) results[`warm ${name}`] = warmHook(name);
 // Cold: a fresh copy of the install for every sample.
 for (const name of COLD > 0 ? ["pre-allow", "pre-deny"] : []) {
   const samples = [];
@@ -137,9 +144,26 @@ const lines = [
   "|---|---|---|---|---|---|",
   ...Object.entries(results).map(([k, s]) => `| ${k} | ${s.n} | ${f(s.p50)} | ${f(s.p95)} | ${f(s.p99)} | ${f(s.max)} |`),
   "",
-  "Target: p95 ≤ 150 ms for an allow (warm), including Node start-up. Not gated: runners vary.",
+  "Targets (owner decision 2026-11-27): warm allow p95 ≤ 150 ms on Linux, ≤ 175 ms on a typical Windows laptop.",
 ];
+
+// Regression gate (--gate <baseline.json>): warm allow p95 relative to Node's own start-up.
+// A breach is measured again, up to twice; it fails only if every attempt is over the limit.
+let gateFailed = false;
+if (GATE) {
+  const baseline = JSON.parse(fs.readFileSync(GATE, "utf8"));
+  let verdict = evaluateGate(results, baseline, process.platform);
+  const attempts = [verdict];
+  for (let i = 0; verdict.status === "fail" && i < 2; i++) {
+    verdict = evaluateGate({ "warm node-empty": warmNode(), "warm pre-allow": warmHook("pre-allow") }, baseline, process.platform);
+    attempts.push(verdict);
+  }
+  gateFailed = verdict.status === "fail";
+  lines.push("", `Start-up gate: **${verdict.status}**: ${attempts.map((a) => a.message).join("; then ")}`);
+}
+
 console.log(lines.join("\n"));
 if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify({ env, results }, null, 2));
 if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join("\n") + "\n");
 fs.rmSync(work, { recursive: true, force: true });
+if (gateFailed) process.exit(1);

@@ -1,8 +1,10 @@
 name: hook-timing
 
-# Wall-clock time of one hook process (p50/p95/p99, warm and cold), on Linux and Windows.
-# Reported in the job summary, not gated: shared runners vary. Target: p95 ≤ 150 ms for an
-# allow, warm, including Node start-up.
+# Wall-clock time of one hook process (p50/p95/p99, warm and cold), on Linux and Windows,
+# reported in the job summary. Targets (owner decision 2026-11-27): warm allow p95 ≤ 150 ms on
+# Linux, ≤ 175 ms on a typical Windows laptop. The shipped bundle is gated against regressions:
+# the job fails when warm allow p95, relative to Node's own start-up on the same runner, is more
+# than 20% over packages/hook/timing-baseline.json in three measurements in a row.
 on:
   push:
     branches: ["**"]
@@ -43,4 +45,5 @@ jobs:
       - run: pnpm --filter @glassbox-ai/hook run bundle
       # Unbundled vs the shipped bundle, back to back on the same runner.
       - run: node packages/hook/scripts/timing.mjs --entry main.js --warm 100 --cold 20
-      - run: node packages/hook/scripts/timing.mjs --entry bundle/main.mjs --warm 100 --cold 20
+      # The shipped bundle, with the start-up regression gate.
+      - run: node packages/hook/scripts/timing.mjs --entry bundle/main.mjs --warm 100 --cold 20 --gate packages/hook/timing-baseline.json

@@ -1,0 +1,8 @@
+{
+  "note": "Start-up regression gate for `node scripts/timing.mjs --gate timing-baseline.json` (hook-timing workflow, shipped bundle). Measure: warm pre-allow p95 divided by bare `node -e \"\"` p50 on the same runner. Fails when that ratio is more than `tolerance` above the baseline in three measurements in a row. Lower the ratios when start-up improves; never raise them to make CI pass. Baselines (2026-11-27): medians of the bundle runs on GitHub's runners, 23 on ubuntu-latest and 24 on windows-latest.",
+  "tolerance": 0.2,
+  "platforms": {
+    "linux": { "ratio": 3.55, "rawP95Ms": 86, "nodeP50Ms": 24 },
+    "win32": { "ratio": 2.38, "rawP95Ms": 132, "nodeP50Ms": 54 }
+  }
+}
