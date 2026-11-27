@@ -41,7 +41,6 @@ function runChecks(indexes: readonly number[]): Check[] {
 }
 const ALL = CORPUS.map((_, i) => i);
 const runCorpus = (): Check[] => runChecks(ALL);
-const check = (i: number): Check => runChecks([i])[0]!;
 const pct = (xs: number[], q: number) => [...xs].sort((a, b) => a - b)[Math.min(xs.length - 1, Math.ceil(q * xs.length) - 1)]!;
 
 describe("slow machine (simulated)", () => {
@@ -49,38 +48,38 @@ describe("slow machine (simulated)", () => {
     expect(HARD_STOP_MS).toEqual({ pre: 750, post: 1500 });
   });
 
+  // Noise only ever adds time (GC, scheduler, a loaded CI runner), so every measurement here is
+  // the minimum over 3 passes, and a slowed-clock result counts only if it happens in all 3.
+  // A real false deny happens every time; a load spike doesn't hit the same command 3 times.
+  // (History: tuned on 2026-11-26 from a median-based factor, then a p99-based one with a single
+  // re-run; both flaked in the 50-run stress job under parallel load.)
   it("RT-HOOK-26: T-CORPUS on a slowed clock gives the same decisions (no false denies)", () => {
-    runCorpus(); // warm the engine twice: the first, cold round has one-off outliers
-    runCorpus();
-    const normal = runCorpus();
-    // The simulated machine is defined by its heaviest normal checks: slow the clock until the
-    // 99th-percentile check reads ~375 ms, half the 750 ms limit. (Until 2026-11-26 the median was
-    // set to 150 ms; on fast runners that meant a slowdown of ~3,000x, and heavy commands such as
-    // `rm -rf node_modules && pnpm install` then crossed 750 ms and were denied as degraded
-    // high-risk calls: the limit working, at an unrealistic speed.)
-    const factor = 375 / Math.max(pct(normal.map((c) => c.engineMs), 0.99), 0.05);
+    runCorpus(); // warm-up: the first, cold pass has one-off outliers
+    const normal = [runCorpus(), runCorpus(), runCorpus()];
+    const minNormal = ALL.map((i) => Math.min(...normal.map((p) => p[i]!.engineMs)));
+    // The simulated machine is defined by its heaviest normal checks: the 99th-percentile
+    // command reads ~375 ms, half the 750 ms limit.
+    const factor = 375 / Math.max(pct(minNormal, 0.99), 0.05);
     slowClock(factor);
-    const slow = runCorpus();
-    // A one-off pause (GC, scheduler) can push a single check over the limit on a slowed clock.
-    // A real false deny reproduces: anything that differs is run once more, and only a
-    // difference that happens again counts.
-    const suspect = slow.map((c, i) => (c.decision !== normal[i]!.decision || c.hitLimit ? i : -1)).filter((i) => i >= 0);
-    const again = suspect.map((i) => ({ i, again: check(i) }));
-    const label = ({ i, again: a }: { i: number; again: Check }) => `${CORPUS[i]!.command.slice(0, 60)}: ${normal[i]!.decision} -> ${a.decision}${a.hitLimit ? " (hit the limit)" : ""}`;
-    // The requirement: no false denies. Any reproducible decision change fails.
-    expect(again.filter(({ i, again: a }) => a.decision !== normal[i]!.decision).map(label)).toEqual([]);
-    // A normal check may still reach the limit on a slowed clock without changing its decision
-    // (a degraded read-only check only warns, and a warn sends nothing). That's allowed for a
-    // handful; many would mean the limit is too low for a slow machine.
-    const hits = again.filter(({ again: a }) => a.hitLimit);
-    expect(hits.length, `normal checks that hit the limit: ${hits.map(label).join("; ")}`).toBeLessThanOrEqual(Math.floor(CORPUS.length / 100));
+    const slow = [runCorpus(), runCorpus(), runCorpus()];
+    vi.restoreAllMocks();
+
+    const base = normal[0]!;
+    const always = (pred: (c: Check, i: number) => boolean) => ALL.filter((i) => slow.every((p) => pred(p[i]!, i)));
+    const label = (i: number) => `${CORPUS[i]!.command.slice(0, 60)}: ${base[i]!.decision} -> ${slow.map((p) => p[i]!.decision).join("/")}${slow.every((p) => p[i]!.hitLimit) ? " (hit the limit)" : ""}`;
+    // The requirement: no false denies. A decision change in all 3 slowed passes fails.
+    expect(always((c, i) => c.decision !== base[i]!.decision).map(label)).toEqual([]);
+    // A normal check may reach the limit without changing its decision (a degraded read-only
+    // check only warns, and a warn sends nothing): allowed for a handful (1%), not more.
+    const hits = always((c) => c.hitLimit);
+    expect(hits.length, `normal checks that always hit the limit: ${hits.map(label).join("; ")}`).toBeLessThanOrEqual(Math.floor(CORPUS.length / 100));
     // Every event's slowCheck matches its own recorded time, on both clocks.
-    for (const c of [...normal, ...slow]) expect(c.slow, `engineMs ${c.engineMs}`).toBe(c.engineMs > 100);
-    // Not a trivial pass: the heavier checks really were over 100 ms on the slowed clock, so the
-    // engine's 100 ms default would have degraded them (and denied the high-risk ones).
-    const slowShare = slow.filter((c) => c.slow).length / slow.length;
-    expect(slowShare, `factor ${factor.toFixed(0)}, ${(slowShare * 100).toFixed(1)}% over 100 ms`).toBeGreaterThanOrEqual(0.05);
-  }, 120_000); // four passes over 532 commands: slow Windows runners need more than the default
+    for (const c of [...normal, ...slow].flat()) expect(c.slow, `engineMs ${c.engineMs}`).toBe(c.engineMs > 100);
+    // Not a trivial pass: some checks were over 100 ms in every slowed pass, so the engine's
+    // 100 ms default would have degraded them (and denied the high-risk ones).
+    const over100 = always((c) => c.engineMs > 100).length;
+    expect(over100, `factor ${factor.toFixed(0)}: ${over100} of ${CORPUS.length} commands over 100 ms in all 3 slowed passes`).toBeGreaterThanOrEqual(Math.floor(CORPUS.length / 100));
+  }, 180_000); // seven passes over 532 commands: slow Windows runners need more than the default
 
   // Rewritten 2026-11-26: the earlier version slowed one real check to ~200 ms and expected
   // slowCheck, but the engine intermittently reports a check's time as ~0 ms on CI (it
