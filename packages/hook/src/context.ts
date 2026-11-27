@@ -48,6 +48,8 @@ const RememberedSchema = v.pipe(
 export function loadConfig(store: Store): Config {
   const r = store.readJson("config.json");
   if (!r.found) return { mode: "balanced", flags: { unverifiedHookOutputs: false }, degradedReasons: [] };
+  // A link or another user's file is never trusted: defaults (balanced, flags off), recorded.
+  if (r.unsafe) return { mode: "balanced", flags: { unverifiedHookOutputs: false }, degradedReasons: ["config-unsafe"] };
   const parsed = r.error ? null : v.safeParse(ConfigSchema, r.value);
   if (!parsed?.success) return { mode: "balanced", flags: { unverifiedHookOutputs: false }, degradedReasons: ["config-invalid"] };
   return {
@@ -60,6 +62,7 @@ export function loadConfig(store: Store): Config {
 export function loadRemembered(store: Store): { rules: RememberedRule[]; degradedReasons: string[] } {
   const r = store.readJson("remembered.json");
   if (!r.found) return { rules: [], degradedReasons: [] };
+  if (r.unsafe) return { rules: [], degradedReasons: ["remembered-unsafe"] };
   const parsed = r.error ? null : v.safeParse(RememberedSchema, r.value);
   return parsed?.success ? { rules: parsed.output, degradedReasons: [] } : { rules: [], degradedReasons: ["remembered-invalid"] };
 }

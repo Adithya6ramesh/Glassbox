@@ -5,6 +5,6 @@ export { buildContext, loadConfig, projectOf, resolvedPathsFor, type Config, typ
 export { eventLine, HOOK_VERSION, inputDigest, SLOW_CHECK_MS, ulid } from "./events.js";
 export { failReply, failVerdict, type FailCause } from "./failrules.js";
 export { blockingReasonOf, EMPTY_REPLY, exit2Fallback, preReply, sanitizeStderrReason, writeReply, type OutputFlags, type Reply } from "./reply.js";
-export { batchOutcome, closeOutcome, EVENT_ARGS, HARD_STOP_MS, isEventArg, reasonFor, runHook, type HookEventArg } from "./run.js";
-export { safeId, Store, type PendingDecision } from "./store.js";
+export { batchOutcome, closeOutcome, EVENT_ARGS, HARD_STOP_MS, isEventArg, reasonFor, recordFailure, runHook, writeCallLog, type HookEventArg } from "./run.js";
+export { LOG_MAX_BYTES, safeId, SESSION_RETENTION_DAYS, SPOOL_MAX_FILES, Store, type PendingDecision } from "./store.js";
 export { summarize, summarizeCommand, summarizePath } from "./summary.js";

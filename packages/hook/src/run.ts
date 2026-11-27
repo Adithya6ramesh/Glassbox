@@ -6,7 +6,8 @@ import { exitCodeFromFailure, isPlainRecord, matchesKnownResponseShape, parseHoo
 import { buildContext, loadConfig, loadRemembered, projectOf, type Config, type HookEnv } from "./context.js";
 import { eventCallId, eventLine, findingsOf, inputDigest, toolInfo, type EventBase } from "./events.js";
 import { failReply, type FailCause } from "./failrules.js";
-import { EMPTY_REPLY, preReply, type Reply } from "./reply.js";
+import { blockingReasonOf, EMPTY_REPLY, preReply, type Reply } from "./reply.js";
+import crypto from "node:crypto";
 import { Store, type PendingDecision } from "./store.js";
 import { summarize } from "./summary.js";
 
@@ -71,15 +72,64 @@ interface Session {
   base: EventBase;
 }
 
+/**
+ * What logs/hook.log records for this call: event, ids, verdicts, outcomes, rule ids, timings,
+ * degraded reasons. Never content (no commands, paths, inputs or outputs).
+ */
+let callLog: Record<string, unknown> = {};
+const note = (fields: Record<string, unknown>) => { callLog = { ...callLog, ...fields }; };
+
 function openSession(input: HookInput, env: HookEnv): Session & { remembered: ReturnType<typeof loadRemembered> } {
   const store = new Store(env.glassboxHome);
+  const fixed = store.fixPermissions();
+  if (fixed.length > 0) note({ "fixed-permissions": fixed });
   const config = loadConfig(store);
   const remembered = loadRemembered(store);
   const project = projectOf(input.cwd, env, store);
+  const degradedReasons = [...config.degradedReasons, ...remembered.degradedReasons, ...(store.saltUnsafe ? ["salt-unsafe"] : [])];
+  if (degradedReasons.length > 0) note({ degraded: degradedReasons });
   return {
     input, store, config, remembered,
-    base: { sessionId: input.session_id, mode: config.mode, project, degradedReasons: [...config.degradedReasons, ...remembered.degradedReasons], startedAtMs: env.startedAtMs },
+    base: { sessionId: input.session_id, mode: config.mode, project, degradedReasons, startedAtMs: env.startedAtMs },
   };
+}
+
+/**
+ * A failure leaves a trace: a "degraded" event saying why, best effort. Only plain fields are
+ * taken from a broken payload (a hostile session_id is hashed by eventLine, never used as a path).
+ */
+export function recordFailure(env: HookEnv, arg: string, cause: string, text: string | null, reply: Reply): void {
+  try {
+    let raw: unknown;
+    try {
+      raw = text ? JSON.parse(text) : undefined;
+    } catch {
+      raw = undefined;
+    }
+    const r = isPlainRecord(raw) ? raw : {};
+    const str = (k: string, max: number) => (typeof r[k] === "string" && (r[k] as string).length > 0 && (r[k] as string).length <= max ? (r[k] as string) : undefined);
+    const store = new Store(env.glassboxHome);
+    const config = loadConfig(store);
+    const cwd = str("cwd", 4096);
+    const project = cwd ? projectOf(cwd, env, store) : { idHash: crypto.createHmac("sha256", store.salt()).update("").digest("hex"), label: "unknown" };
+    const tool = str("tool_name", 256);
+    const reasons = [cause, ...config.degradedReasons];
+    store.spool([eventLine({ sessionId: str("session_id", 256) ?? "unknown", mode: config.mode, project, degradedReasons: reasons, startedAtMs: env.startedAtMs }, {
+      kind: "degraded", tool: tool ? toolInfo(tool) : undefined, appliedAs: blockingReasonOf(reply) ? "deny" : "allow",
+    })].filter((l): l is string => l !== null));
+    note({ event: arg, degraded: reasons });
+  } catch {
+    // Best effort: the reply stands.
+  }
+}
+
+/** Append this call's line to logs/hook.log. Best effort. */
+export function writeCallLog(env: HookEnv, startedMs: number): void {
+  try {
+    new Store(env.glassboxHome).log({ ts: new Date(Date.now()).toISOString(), ...callLog, ms: Math.round((performance.now() - startedMs) * 10) / 10 });
+  } catch {
+    // A log line is never worth failing a call.
+  }
 }
 
 function parse(text: string, expected: KnownHookEvent): { ok: true; input: HookInput } | { ok: false; toolName: unknown } {
@@ -97,18 +147,26 @@ function parse(text: string, expected: KnownHookEvent): { ok: true; input: HookI
 /** Run one hook event. Never throws. */
 export function runHook(arg: string, text: string, env: HookEnv): Reply {
   if (!isEventArg(arg)) return EMPTY_REPLY;
+  const started = performance.now();
+  callLog = { event: arg };
   let toolName: unknown;
+  let reply: Reply;
   try {
     const p = parse(text, EVENT_ARGS[arg]);
     if (!p.ok) {
       toolName = p.toolName;
-      return failReply(arg, toolName, "invalid input");
+      reply = failReply(arg, toolName, "invalid input");
+      recordFailure(env, arg, "hook-invalid-input", text, reply);
+    } else {
+      toolName = "tool_name" in p.input ? p.input.tool_name : undefined;
+      reply = handle(arg, p.input, env);
     }
-    toolName = "tool_name" in p.input ? p.input.tool_name : undefined;
-    return handle(arg, p.input, env);
   } catch {
-    return failReply(arg, toolName, "internal error" satisfies FailCause);
+    reply = failReply(arg, toolName, "internal error" satisfies FailCause);
+    recordFailure(env, arg, "hook-internal-error", text, reply);
   }
+  writeCallLog(env, started);
+  return reply;
 }
 
 function handle(arg: HookEventArg, input: HookInput, env: HookEnv): Reply {
@@ -121,7 +179,16 @@ function handle(arg: HookEventArg, input: HookInput, env: HookEnv): Reply {
     case "UserPromptSubmit": return record(() => closeOpen(openSession(input, env), (p) => p.agentId === null));
     case "SubagentStop": return record(() => closeOpen(openSession(input, env), (p) => p.agentId === input.agent_id));
     case "SessionEnd": return record(() => closeOpen(openSession(input, env), () => true, "session_end"));
-    case "SessionStart": return record(() => { const s = openSession(input, env); spool(s, [eventLine(s.base, { kind: "session_start" })]); });
+    case "SessionStart": return record(() => {
+      const s = openSession(input, env);
+      const pruned = s.store.pruneSessions(Date.now());
+      if (pruned > 0) note({ pruned });
+      spool(s, [eventLine(s.base, { kind: "session_start" })]);
+    });
+    case "PermissionRequest": return record(() => {
+      const s = openSession(input, env);
+      note({ claudeCodeAsked: s.store.markClaudeCodeAsked(input.session_id, input.tool_name, inputDigest(input.tool_input), input.agent_id ?? null) });
+    });
     default:
       void arg;
       return EMPTY_REPLY;
@@ -139,7 +206,8 @@ function record(fn: () => void): Reply {
 }
 
 function spool(s: Session, lines: (string | null)[]): void {
-  s.store.spool(lines.filter((l): l is string => l !== null));
+  const r = s.store.spool(lines.filter((l): l is string => l !== null));
+  if (r !== "written") note({ spool: r });
 }
 
 function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>, env: HookEnv): Reply {
@@ -165,6 +233,10 @@ function handlePre(input: Extract<HookInput, { hook_event_name: "PreToolUse" }>,
       deferredSignals: d.signals.filter((g) => g.kind === "scheduled-job"), createdAt: new Date(Date.now()).toISOString(),
     });
     const degradedReasons = [...s.base.degradedReasons, ...(d.degraded ? d.degradedReasons : [])];
+    note({
+      callId: eventCallId(input.tool_use_id), verdict: d.verdict, appliedAs, ruleIds: d.findings.map((f) => f.ruleId).slice(0, 20),
+      engineMs: Math.round(d.elapsedMs * 10) / 10, ...(degradedReasons.length > 0 ? { degraded: degradedReasons } : {}),
+    });
     spool(s, [eventLine({ ...s.base, degradedReasons }, {
       kind: "tool_pre", callId: eventCallId(input.tool_use_id), tool: toolInfo(input.tool_name), verdict: d.verdict, appliedAs,
       actionRisk, findings: findingsOf(d), summary, engineMs: d.elapsedMs, rulesetVersion: d.rulesetVersion,
@@ -220,6 +292,7 @@ function handlePost(input: Extract<HookInput, { hook_event_name: "PostToolUse" }
       }
     }
     const findings = [...rewriteFinding(p, input.tool_input), ...findingsOf(d)];
+    note({ callId: eventCallId(input.tool_use_id), outcome: "ran", ruleIds: findings.map((f) => f.ruleId).slice(0, 20), engineMs: Math.round(d.elapsedMs * 10) / 10 });
     spool(s, [postEvent(s, p, input.tool_name, input.tool_use_id, "ran", {
       ...(p ? {} : { summary: summarize(input.tool_name, input.tool_input, { cwd: ctx.cwd, homeDir: env.homeDir, caseInsensitive: ctx.caseInsensitiveFs }) }),
       ...(findings.length ? { findings } : {}),
@@ -245,6 +318,7 @@ function handleFailure(input: Extract<HookInput, { hook_event_name: "PostToolUse
     ...(input.is_interrupt ? { interrupted: true } : {}),
   };
   const findings = rewriteFinding(p, input.tool_input);
+  note({ callId: eventCallId(input.tool_use_id), outcome: "failed" });
   spool(s, [postEvent(s, p, input.tool_name, input.tool_use_id, "failed", { summary, ...(findings.length ? { findings } : {}) })]);
 }
 
@@ -264,17 +338,22 @@ function handleBatch(input: Extract<HookInput, { hook_event_name: "PostToolBatch
     if (p === null) continue;
     lines.push(postEvent(s, p, c.tool_name, c.tool_use_id, batchOutcome(p, c.tool_response)));
   }
+  if (lines.length > 0) note({ closed: lines.length });
   spool(s, lines);
 }
 
 /** No event follows an unanswered or refused ask in an interactive session: close what is still open. */
-export function closeOutcome(p: Pick<PendingDecision, "appliedAs">): Outcome {
-  return p.appliedAs === "ask" ? "asked-not-run" : p.appliedAs === "deny" ? "blocked" : "unknown";
+export function closeOutcome(p: Pick<PendingDecision, "appliedAs" | "claudeCodeAsked">): Outcome {
+  if (p.appliedAs === "deny") return "blocked";
+  // Asked by Glassbox, or by Claude Code's own prompt (PermissionRequest), and nothing followed.
+  if (p.appliedAs === "ask" || p.claudeCodeAsked === true) return "asked-not-run";
+  return "unknown";
 }
 
 function closeOpen(s: Session, match: (p: PendingDecision) => boolean, kind?: "session_stop" | "session_end"): void {
   const open = s.store.takeAllPending(s.input.session_id, match);
   const lines = open.map((p) => postEvent(s, p, p.toolName, p.callId, closeOutcome(p)));
+  if (open.length > 0) note({ closed: open.length });
   if (kind) lines.push(eventLine(s.base, { kind }));
   spool(s, lines);
 }
